@@ -21,12 +21,14 @@ import Observation
 /// `RenderNode` slot tracks the mutable render-affecting state (`dirty`,
 /// the compute trio) and flips `needsRender` on its own.
 @Observable
-public final class SkiaShaderNode: VulkanSkiaRenderNode {
-
+public final class SkiaShaderNode<ContainerNode: RenderContainerNode>: VulkanSkiaRenderNode {
+    
+    public typealias Engine = VulkanRenderEngine<ContainerNode>
+    
     public var canvas: SkiaVulkanCanvas
     public let width:  UInt32
     public let height: UInt32
-
+    
     public let image:                VkImage
     public let imageView:            VkImageView
     /// The allocation backing `image` — same contract as the thor node:
@@ -37,17 +39,17 @@ public final class SkiaShaderNode: VulkanSkiaRenderNode {
     public var computeLayout:        VkPipelineLayout?
     public var computeDescriptorSet: VkDescriptorSet?
     public var dirty:                Bool = true
-
+    
     /// Always true here: the image is engine-created with STORAGE usage,
     /// so a canvas post shader may bind it as its compute output.
     public let storageCapable: Bool
-
+    
     /// The image's actual current Vulkan-tracked layout, updated after
     /// every barrier the engine records — and mirrored into Skia via
     /// `notifyLayout` before each flush, so Skia never records a
     /// transition from a stale layout.
     var currentLayout: VkImageLayout
-
+    
     public init(
         canvas:               SkiaVulkanCanvas,
         width:                UInt32,
@@ -71,5 +73,78 @@ public final class SkiaShaderNode: VulkanSkiaRenderNode {
         self.computePipeline      = computePipeline
         self.computeLayout        = computeLayout
         self.computeDescriptorSet = computeDescriptorSet
+    }
+}
+
+extension SkiaShaderNode {
+    public func update(_ engine: Engine, slot: ContainerNode, cmd: VkCommandBuffer) {
+        let id = slot.id
+        guard slot.needsRender else { return }
+        guard let surface = canvas.surface else { return }
+        
+        // The engine's barriers moved the image since Skia's last flush —
+        // hand Skia the layout the image is *really* in, then flush with
+        // an explicit final state matching what the barrier below assumes.
+        surface.notifyLayout(currentLayout.rawValue)
+        let flushed = surface.flush(
+            finalLayout: VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL.rawValue,
+            syncCpu:     false
+        )
+        guard flushed else {
+            if engine.warnedFailedNodes.insert(id).inserted {
+                print("VulkanRenderEngine: skia node \(id) flush/submit failed — logged once")
+            }
+            return
+        }
+        engine.warnedFailedNodes.remove(id)
+        
+        let priorLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL
+        let priorAccess = VkAccessFlags(VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT.rawValue)
+        
+        if let pipeline = computePipeline,
+           let layout   = computeLayout,
+           let ds       = computeDescriptorSet {
+            
+            skiaEngineImageBarrier(
+                cmd,
+                image:     image,
+                srcLayout: priorLayout,
+                srcAccess: priorAccess,
+                srcStage:  VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+                dstLayout: VK_IMAGE_LAYOUT_GENERAL,
+                dstAccess: VkAccessFlags(VK_ACCESS_SHADER_READ_BIT.rawValue) | VkAccessFlags(VK_ACCESS_SHADER_WRITE_BIT.rawValue),
+                dstStage:  VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT
+            )
+            vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline)
+            var descSet: VkDescriptorSet? = ds
+            vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, layout, 0, 1, &descSet, 0, nil)
+            vkCmdDispatch(cmd, (width + 7) / 8, (height + 7) / 8, 1)
+            skiaEngineImageBarrier(
+                cmd,
+                image:     image,
+                srcLayout: VK_IMAGE_LAYOUT_GENERAL,
+                srcAccess: VkAccessFlags(VK_ACCESS_SHADER_WRITE_BIT.rawValue),
+                srcStage:  VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                dstLayout: VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                dstAccess: VkAccessFlags(VK_ACCESS_SHADER_READ_BIT.rawValue),
+                dstStage:  VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT
+            )
+        } else {
+            skiaEngineImageBarrier(
+                cmd,
+                image:     image,
+                srcLayout: priorLayout,
+                srcAccess: priorAccess,
+                srcStage:  VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+                dstLayout: VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                dstAccess: VkAccessFlags(VK_ACCESS_SHADER_READ_BIT.rawValue),
+                dstStage:  VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT
+            )
+        }
+        currentLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+        engine.readable.insert(id)
+        // slot.needsRender deliberately not cleared — same steady-state as
+        // the other node updates until the canvas side drives updates
+        // through the Observation chain.
     }
 }
