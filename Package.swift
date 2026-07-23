@@ -3,6 +3,19 @@
 
 import PackageDescription
 
+let devMode = false
+
+func getDependencies() -> [Package.Dependency] {
+    if devMode {
+        return [
+            .package(path: "../NucleantVulkan")
+        ]
+    }
+    return [
+        .package(url: "https://github.com/NucleantUI/NucleantVulkan", branch: "refactor"),
+    ]
+}
+
 let package = Package(
     name: "NucleantSkia",
     platforms: [
@@ -15,9 +28,7 @@ let package = Package(
             targets: ["NucleantSkia"]
         ),
     ],
-    dependencies: [
-        .package(path: "../NucleantVulkan")
-    ],
+    dependencies: getDependencies(),
     targets: [
         // Targets are the basic building blocks of a package, defining a module or a test suite.
         // Targets can depend on other targets in this package and products from dependencies.
