@@ -175,18 +175,10 @@ extension VulkanRenderEngine {
         )
     }
 
-    /// Same contract as the thor/pixel variants: takes the node's GPU
-    /// resources down after draining the device — plus the Skia surface,
-    /// which must die first (it holds views onto the image).
-    public func destroyResources(of node: SkiaShaderNode<RenderNode>) {
-        vkDeviceWaitIdle(device)
-        node.canvas.dropSurface()
-        vkDestroyImageView(device, node.imageView, nil)
-        vkDestroyImage(device, node.image, nil)
-        if let memory = node.memory {
-            vkFreeMemory(device, memory, nil)
-        }
-    }
+    // destroyResources moved onto the node itself — SkiaShaderNode conforms
+    // to VulkanRenderNode.destroyResources(_:), which drops the surface then
+    // frees image/view/memory. The engine no longer needs a per-node-kind
+    // teardown method here.
 }
 
 

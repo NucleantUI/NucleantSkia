@@ -147,4 +147,17 @@ extension SkiaShaderNode {
         // the other node updates until the canvas side drives updates
         // through the Observation chain.
     }
+
+    /// Free the GPU resources this node owns after draining the device —
+    /// the Skia surface first, since it holds Ganesh's views onto the
+    /// image, then the image/view/memory.
+    public func destroyResources(_ engine: Engine) {
+        vkDeviceWaitIdle(engine.device)
+        canvas.dropSurface()
+        vkDestroyImageView(engine.device, imageView, nil)
+        vkDestroyImage(engine.device, image, nil)
+        if let memory {
+            vkFreeMemory(engine.device, memory, nil)
+        }
+    }
 }
