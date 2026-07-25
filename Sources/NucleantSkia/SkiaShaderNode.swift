@@ -26,15 +26,15 @@ public final class SkiaShaderNode<ContainerNode: RenderContainerNode>: VulkanSki
     public typealias Engine = VulkanRenderEngine<ContainerNode>
     
     public var canvas: SkiaVulkanCanvas
-    public let width:  UInt32
-    public let height: UInt32
+    public var width:  UInt32
+    public var height: UInt32
     
-    public let image:                VkImage
-    public let imageView:            VkImageView
+    public var image:                VkImage
+    public var imageView:            VkImageView
     /// The allocation backing `image` — same contract as the thor node:
     /// the engine binds but never frees it on its own; whoever tears the
     /// node down (resize, detach) goes through `destroyResources(of:)`.
-    public let memory:               VkDeviceMemory?
+    public var memory:               VkDeviceMemory?
     public var computePipeline:      VkPipeline?
     public var computeLayout:        VkPipelineLayout?
     public var computeDescriptorSet: VkDescriptorSet?

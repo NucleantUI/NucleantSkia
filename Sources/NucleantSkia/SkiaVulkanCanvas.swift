@@ -32,4 +32,13 @@ public final class SkiaVulkanCanvas: SkiaGPUCanvas {
         surface?.destroy()
         surface = nil
     }
+
+    /// Swap in a freshly-built surface (an in-place resize): the outgoing
+    /// surface holds Ganesh's views onto the old image, so it's destroyed
+    /// first — the caller frees that image only afterwards. Same context, new
+    /// target; the node keeps its identity.
+    public func replaceSurface(_ newSurface: SkiaSurface) {
+        surface?.destroy()
+        surface = newSurface
+    }
 }
