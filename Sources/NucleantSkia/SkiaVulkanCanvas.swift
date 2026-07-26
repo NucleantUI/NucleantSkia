@@ -32,4 +32,13 @@ public final class SkiaVulkanCanvas: SkiaGPUCanvas {
         surface?.destroy()
         surface = nil
     }
+
+    /// Swap in the surface wrapping a freshly-resized VkImage, destroying the
+    /// old one first (it holds Ganesh views onto the now-freed image). Used by
+    /// the engine's in-place `resizeSkiaNode` so the canvas keeps its identity
+    /// across a resize.
+    public func replaceSurface(_ newSurface: SkiaSurface) {
+        surface?.destroy()
+        surface = newSurface
+    }
 }

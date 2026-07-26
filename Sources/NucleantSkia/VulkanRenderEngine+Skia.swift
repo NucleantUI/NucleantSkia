@@ -175,6 +175,79 @@ extension VulkanRenderEngine {
         )
     }
 
+    /// Resize an existing Skia node **in place** — the Skia counterpart of
+    /// `resizeThorNode`. Mints a fresh engine-owned VkImage + `SkiaSurface` at
+    /// the new size (reusing the node's own `SkiaVulkanContext`), waits for the
+    /// device to idle, then swaps the new backing into the *same*
+    /// `SkiaShaderNode` so its identity — id, composite slot, z-order,
+    /// Observation registration — is preserved and nothing above needs
+    /// rebinding. A resize must not remake the node (that's for widget
+    /// add/remove or a canvas swap). The old image/view/memory and surface are
+    /// freed once the swap lands and the device is idle. Returns false — node
+    /// untouched, still at the old size — on any failure, so the widget stays
+    /// visible instead of going dark.
+    ///
+    /// `id` is the node's composite slot id: the engine caches a sampler
+    /// descriptor per slot on the assumption a node's imageView never changes,
+    /// so that cache is dropped here (`invalidateComposite`) to force a rebuild
+    /// from the new view.
+    @discardableResult
+    public func resizeSkiaNode(
+        _ node: SkiaShaderNode<RenderNode>,
+        id:     Int,
+        width:  Int,
+        height: Int
+    ) -> Bool {
+        guard width > 0, height > 0,
+              node.width != UInt32(width) || node.height != UInt32(height)
+        else { return true }   // already that size — nothing to do
+
+        // Build the new backing through the same factory the node was created
+        // with, on its own context so Ganesh's device/queue stay shared. Built
+        // before the old one is touched, so a failure here leaves the node
+        // drawing at the old size. `fresh` is a throwaway carrier: we move its
+        // image/view/memory/surface into `node` and discard it without
+        // `destroyResources`, so nothing frees what we just handed over.
+        guard let fresh = makeSkiaWidgetNode(
+            context: node.canvas.context,
+            width:   width,
+            height:  height
+        ), let freshSurface = fresh.canvas.surface else {
+            print("VulkanRenderEngine: skia node resize backing creation failed")
+            return false
+        }
+
+        // Hold the old handles; free them only after the device is idle so no
+        // in-flight command buffer still samples them.
+        let oldImage  = node.image
+        let oldView   = node.imageView
+        let oldMemory = node.memory
+
+        vkDeviceWaitIdle(device)
+
+        // Swap the new backing into the existing node and canvas.
+        node.image         = fresh.image
+        node.imageView     = fresh.imageView
+        node.memory        = fresh.memory
+        node.width         = UInt32(width)
+        node.height        = UInt32(height)
+        // makeSkiaWidgetNode leaves the fresh image in COLOR_ATTACHMENT_OPTIMAL.
+        node.currentLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL
+        node.canvas.replaceSurface(freshSurface)
+        node.dirty         = true
+
+        // Old backing: safe to free now the node points elsewhere and the
+        // device is idle.
+        vkDestroyImageView(device, oldView, nil)
+        vkDestroyImage(device, oldImage, nil)
+        if let oldMemory { vkFreeMemory(device, oldMemory, nil) }
+
+        // Cached sampler descriptor still points at the freed view — drop it so
+        // the next frame rebuilds from the new one.
+        invalidateComposite(id: id)
+        return true
+    }
+
     // destroyResources moved onto the node itself — SkiaShaderNode conforms
     // to VulkanRenderNode.destroyResources(_:), which drops the surface then
     // frees image/view/memory. The engine no longer needs a per-node-kind
