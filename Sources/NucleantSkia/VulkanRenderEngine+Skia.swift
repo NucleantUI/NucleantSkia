@@ -56,15 +56,15 @@ extension VulkanRenderEngine {
         )
     }
 
-    /// Build a whole self-contained Skia render target: an engine-owned
-    /// VkImage (same shape as the thor node's owned-image path) and a
-    /// `SkiaSurface` wrapping it. Callers append the returned node into
-    /// `nodes` themselves; this only builds it.
-    public func makeSkiaWidgetNode(
+    /// Build the engine-owned VkImage (same shape as the thor node's
+    /// owned-image path) and the `SkiaSurface` wrapping it — the part node
+    /// creation (`makeSkiaWidgetNode`) and in-place resize (`resizeSkiaNode`)
+    /// share. Returns nil (freeing any partial allocation) on failure.
+    func makeSkiaImageAndSurface(
         context: SkiaVulkanContext,
         width:   Int,
         height:  Int
-    ) -> SkiaShaderNode<RenderNode>? {
+    ) -> (image: VkImage, view: VkImageView, memory: VkDeviceMemory?, surface: SkiaSurface)? {
         // GrVkGpu::onWrapBackendRenderTarget (check_image_info) unconditionally
         // requires BOTH transfer bits on any VkImage Ganesh wraps — without
         // TRANSFER_SRC_BIT it silently rejects the wrap (WrapBackendRenderTarget
@@ -162,16 +162,30 @@ extension VulkanRenderEngine {
             return nil
         }
 
+        return (image, view, memory, surface)
+    }
+
+    /// Build a whole self-contained Skia render target: an engine-owned
+    /// VkImage and a `SkiaSurface` wrapping it, packed into a node. Callers
+    /// append the returned node into `nodes` themselves; this only builds it.
+    public func makeSkiaWidgetNode(
+        context: SkiaVulkanContext,
+        width:   Int,
+        height:  Int
+    ) -> SkiaShaderNode<RenderNode>? {
+        guard let built = makeSkiaImageAndSurface(context: context, width: width, height: height) else {
+            return nil
+        }
         return SkiaShaderNode(
             canvas: SkiaVulkanCanvas(
                 context: context,
-                surface: surface
+                surface: built.surface
             ),
             width:     UInt32(width),
             height:    UInt32(height),
-            image:     image,
-            imageView: view,
-            memory:    memory
+            image:     built.image,
+            imageView: built.view,
+            memory:    built.memory
         )
     }
 
