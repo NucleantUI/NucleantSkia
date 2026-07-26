@@ -19,6 +19,9 @@ func getDependencies() -> [Package.Dependency] {
 let package = Package(
     name: "NucleantSkia",
     platforms: [
+        // iOS 17 to match the graph's Observation-framework floor (macOS 14).
+        // (Full iOS build also needs an iOS slice of Skia.xcframework.)
+        .iOS(.v17),
         .macOS(.v14)
     ],
     products: [

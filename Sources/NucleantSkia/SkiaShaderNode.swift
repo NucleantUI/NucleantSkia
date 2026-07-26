@@ -26,9 +26,12 @@ public final class SkiaShaderNode<ContainerNode: RenderContainerNode>: VulkanSki
     public typealias Engine = VulkanRenderEngine<ContainerNode>
     
     public var canvas: SkiaVulkanCanvas
+    // Mutable so `resizeSkiaNode` can swap a new backing in place while the
+    // node keeps its identity (id, composite slot, z-order) — mirrors
+    // `ThorShaderNode`.
     public var width:  UInt32
     public var height: UInt32
-    
+
     public var image:                VkImage
     public var imageView:            VkImageView
     /// The allocation backing `image` — same contract as the thor node:
