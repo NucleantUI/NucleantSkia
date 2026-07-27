@@ -24,7 +24,12 @@
 #include "include/gpu/vk/VulkanBackendContext.h"
 #include "include/gpu/vk/VulkanExtensions.h"
 #include "include/gpu/vk/VulkanMutableTextureState.h"
+#ifdef __APPLE__
 #include "include/ports/SkFontMgr_mac_ct.h"
+#else
+#include "include/ports/SkFontMgr_fontconfig.h"
+#include "include/ports/SkFontScanner_FreeType.h"
+#endif
 
 #include <cstring>
 
@@ -331,7 +336,11 @@ void cskia_canvas_draw_line(
 
 static sk_sp<SkTypeface> default_typeface() {
     static sk_sp<SkTypeface> typeface = [] {
+#ifdef __APPLE__
         sk_sp<SkFontMgr> mgr = SkFontMgr_New_CoreText(nullptr);
+#else
+        sk_sp<SkFontMgr> mgr = SkFontMgr_New_FontConfig(nullptr, SkFontScanner_Make_FreeType());
+#endif
         if (!mgr) {
             return sk_sp<SkTypeface>();
         }
