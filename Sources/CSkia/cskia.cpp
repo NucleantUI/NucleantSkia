@@ -24,8 +24,13 @@
 #include "include/gpu/vk/VulkanBackendContext.h"
 #include "include/gpu/vk/VulkanExtensions.h"
 #include "include/gpu/vk/VulkanMutableTextureState.h"
-#ifdef __APPLE__
+#if defined(__APPLE__)
 #include "include/ports/SkFontMgr_mac_ct.h"
+#elif defined(__ANDROID__)
+// Android has no fontconfig. Its font manager reads /system/etc/fonts.xml
+// instead (which is why the Android Skia build needs expat).
+#include "include/ports/SkFontMgr_android.h"
+#include "include/ports/SkFontScanner_FreeType.h"
 #else
 #include "include/ports/SkFontMgr_fontconfig.h"
 #include "include/ports/SkFontScanner_FreeType.h"
@@ -336,8 +341,11 @@ void cskia_canvas_draw_line(
 
 static sk_sp<SkTypeface> default_typeface() {
     static sk_sp<SkTypeface> typeface = [] {
-#ifdef __APPLE__
+#if defined(__APPLE__)
         sk_sp<SkFontMgr> mgr = SkFontMgr_New_CoreText(nullptr);
+#elif defined(__ANDROID__)
+        // NULL custom fonts == system fonts only.
+        sk_sp<SkFontMgr> mgr = SkFontMgr_New_Android(nullptr, SkFontScanner_Make_FreeType());
 #else
         sk_sp<SkFontMgr> mgr = SkFontMgr_New_FontConfig(nullptr, SkFontScanner_Make_FreeType());
 #endif
