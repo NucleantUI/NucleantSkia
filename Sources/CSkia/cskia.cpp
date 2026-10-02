@@ -136,11 +136,6 @@ cskia_context_t* cskia_context_create(
         delete ctx;
         return nullptr;
     }
-    fprintf(stderr, "cskia: context created — colorTypeSupportedAsSurface(RGBA_8888)=%d "
-                    "maxSurfaceSampleCount(RGBA_8888)=%d defaultBackendFormat(RGBA_8888,renderable).isValid=%d\n",
-            ctx->gr->colorTypeSupportedAsSurface(kRGBA_8888_SkColorType),
-            ctx->gr->maxSurfaceSampleCountForColorType(kRGBA_8888_SkColorType),
-            ctx->gr->defaultBackendFormat(kRGBA_8888_SkColorType, GrRenderable::kYes).isValid());
     return ctx;
 }
 
@@ -195,18 +190,6 @@ cskia_surface_t* cskia_surface_wrap_vk_image(
 
     auto* wrapper = new cskia_surface_t();
     wrapper->renderTarget = GrBackendRenderTargets::MakeVk(width, height, info);
-
-    GrBackendFormat rtFormat = wrapper->renderTarget.getBackendFormat();
-    VkFormat extractedFormat = VK_FORMAT_UNDEFINED;
-    bool gotFormat = GrBackendFormats::AsVkFormat(rtFormat, &extractedFormat);
-    fprintf(stderr, "cskia: wrap_vk_image: rt.sampleCnt=%d rtFormat.isValid=%d "
-                    "AsVkFormat.ok=%d extractedFormat=%d (expected %d)\n",
-            wrapper->renderTarget.sampleCnt(), rtFormat.isValid(), gotFormat,
-            (int)extractedFormat, (int)info.fFormat);
-
-    fprintf(stderr, "cskia: wrap_vk_image: gr=%p renderTarget.isValid=%d width=%d height=%d usage=0x%x layout=%d\n",
-            (void*)ctx->gr.get(), wrapper->renderTarget.isValid(), width, height,
-            (unsigned)vk_usage_flags, (int)vk_image_layout);
 
     SkSurfaceProps props;
     wrapper->surface = SkSurfaces::WrapBackendRenderTarget(

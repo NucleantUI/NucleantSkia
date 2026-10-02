@@ -99,7 +99,6 @@ extension SkiaShaderNode {
             }
             return
         }
-        engine.warnedFailedNodes.remove(id)
         
         let priorLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL
         let priorAccess = VkAccessFlags(VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT.rawValue)

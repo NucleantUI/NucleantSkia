@@ -4,7 +4,19 @@
 import Foundation
 import PackageDescription
 
-let devMode = true
+/// Build against the sibling `../NucleantVulkan` checkout or against its
+/// `master` on GitHub — decided the same way in every Nucleant package:
+/// `NUCLEANT_LOCAL_DEV=1|0` in the environment wins; otherwise local when the
+/// sibling checkout exists next to this package. (A package fetched by
+/// revision may not have path dependencies, so a clone SwiftPM made under
+/// `.build/checkouts` has to take the GitHub one.)
+let devMode: Bool = {
+    if let flag = ProcessInfo.processInfo.environment["NUCLEANT_LOCAL_DEV"] {
+        return ["1", "true", "yes"].contains(flag.lowercased())
+    }
+    let siblings = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+    return FileManager.default.fileExists(atPath: siblings.appendingPathComponent("NucleantVulkan").path)
+}()
 
 func getPlatformTarget() -> PackageDescription.Platform {
     // Package.swift is compiled by the *host* toolchain even when
@@ -49,7 +61,7 @@ func getDependencies() -> [Package.Dependency] {
         ]
     }
     return [
-        .package(url: "https://github.com/NucleantUI/NucleantVulkan", branch: "master"),
+        .package(url: "https://github.com/NucleantUI/NucleantVulkan.git", branch: "master"),
     ]
 }
 
