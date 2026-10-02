@@ -86,7 +86,7 @@ func skiaTargets() -> [Target] {
             .target(
                 name: "CSkia",
                 path: "Sources/CSkia",
-                sources: ["cskia.cpp"],
+                sources: ["cskia.cpp", "cskia_api.cpp"],
                 publicHeadersPath: "include",
                 cxxSettings: [
                     .headerSearchPath("."),
@@ -139,7 +139,7 @@ func skiaTargets() -> [Target] {
             .target(
                 name: "CSkia",
                 path: "Sources/CSkia",
-                sources: ["cskia.cpp"],
+                sources: ["cskia.cpp", "cskia_api.cpp"],
                 publicHeadersPath: "include",
                 cxxSettings: [
                     .headerSearchPath("."),
@@ -214,7 +214,9 @@ func mainTargets() -> [Target] {
         ),
         .testTarget(
             name: "NucleantSkiaTests",
-            dependencies: ["NucleantSkia"]
+            dependencies: ["NucleantSkia"],
+            // Roboto, for the font tests — a known face on every platform.
+            resources: [.copy("Resources")]
         ),
     ]
 }
