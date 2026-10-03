@@ -24,8 +24,13 @@
 #include "include/gpu/vk/VulkanBackendContext.h"
 #include "include/gpu/vk/VulkanExtensions.h"
 #include "include/gpu/vk/VulkanMutableTextureState.h"
-#ifdef __APPLE__
+#if defined(__APPLE__)
 #include "include/ports/SkFontMgr_mac_ct.h"
+#elif defined(__ANDROID__)
+// Android has no fontconfig. Its font manager reads /system/etc/fonts.xml
+// instead (which is why the Android Skia build needs expat).
+#include "include/ports/SkFontMgr_android.h"
+#include "include/ports/SkFontScanner_FreeType.h"
 #else
 #include "include/ports/SkFontMgr_fontconfig.h"
 #include "include/ports/SkFontScanner_FreeType.h"
@@ -131,11 +136,6 @@ cskia_context_t* cskia_context_create(
         delete ctx;
         return nullptr;
     }
-    fprintf(stderr, "cskia: context created — colorTypeSupportedAsSurface(RGBA_8888)=%d "
-                    "maxSurfaceSampleCount(RGBA_8888)=%d defaultBackendFormat(RGBA_8888,renderable).isValid=%d\n",
-            ctx->gr->colorTypeSupportedAsSurface(kRGBA_8888_SkColorType),
-            ctx->gr->maxSurfaceSampleCountForColorType(kRGBA_8888_SkColorType),
-            ctx->gr->defaultBackendFormat(kRGBA_8888_SkColorType, GrRenderable::kYes).isValid());
     return ctx;
 }
 
@@ -190,18 +190,6 @@ cskia_surface_t* cskia_surface_wrap_vk_image(
 
     auto* wrapper = new cskia_surface_t();
     wrapper->renderTarget = GrBackendRenderTargets::MakeVk(width, height, info);
-
-    GrBackendFormat rtFormat = wrapper->renderTarget.getBackendFormat();
-    VkFormat extractedFormat = VK_FORMAT_UNDEFINED;
-    bool gotFormat = GrBackendFormats::AsVkFormat(rtFormat, &extractedFormat);
-    fprintf(stderr, "cskia: wrap_vk_image: rt.sampleCnt=%d rtFormat.isValid=%d "
-                    "AsVkFormat.ok=%d extractedFormat=%d (expected %d)\n",
-            wrapper->renderTarget.sampleCnt(), rtFormat.isValid(), gotFormat,
-            (int)extractedFormat, (int)info.fFormat);
-
-    fprintf(stderr, "cskia: wrap_vk_image: gr=%p renderTarget.isValid=%d width=%d height=%d usage=0x%x layout=%d\n",
-            (void*)ctx->gr.get(), wrapper->renderTarget.isValid(), width, height,
-            (unsigned)vk_usage_flags, (int)vk_image_layout);
 
     SkSurfaceProps props;
     wrapper->surface = SkSurfaces::WrapBackendRenderTarget(
@@ -336,8 +324,11 @@ void cskia_canvas_draw_line(
 
 static sk_sp<SkTypeface> default_typeface() {
     static sk_sp<SkTypeface> typeface = [] {
-#ifdef __APPLE__
+#if defined(__APPLE__)
         sk_sp<SkFontMgr> mgr = SkFontMgr_New_CoreText(nullptr);
+#elif defined(__ANDROID__)
+        // NULL custom fonts == system fonts only.
+        sk_sp<SkFontMgr> mgr = SkFontMgr_New_Android(nullptr, SkFontScanner_Make_FreeType());
 #else
         sk_sp<SkFontMgr> mgr = SkFontMgr_New_FontConfig(nullptr, SkFontScanner_Make_FreeType());
 #endif

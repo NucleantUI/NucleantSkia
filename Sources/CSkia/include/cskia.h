@@ -15,6 +15,9 @@
 #include <stdint.h>
 #include <stdbool.h>
 
+// The full drawing API (SkCanvas, SkPaint, SkPath, SkFont, …).
+#include "cskia_api.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
