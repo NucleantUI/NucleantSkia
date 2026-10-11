@@ -4,6 +4,7 @@
 //
 #include "cskia_api.h"
 
+#include "include/codec/SkCodec.h"
 #include "include/core/SkCanvas.h"
 #include "include/core/SkBlurTypes.h"
 #include "include/core/SkColor.h"
@@ -35,6 +36,9 @@
 #elif defined(__ANDROID__)
 #include "include/ports/SkFontMgr_android.h"
 #include "include/ports/SkFontScanner_FreeType.h"
+#elif defined(__wasm__)
+// The browser: no system fonts, faces only from files and data.
+#include "include/ports/SkFontMgr_empty.h"
 #else
 #include "include/ports/SkFontMgr_fontconfig.h"
 #include "include/ports/SkFontScanner_FreeType.h"
@@ -42,15 +46,20 @@
 
 #include <algorithm>
 #include <cstring>
+#include <memory>
 #include <vector>
 
 // MARK: - Handle casts
 //
 // The C handles are the Skia objects themselves; only the raster surface
-// carries a wrapper (it has to hold the sk_sp).
+// and the codec carry a wrapper (they have to hold the sk_sp / unique_ptr).
 
 struct cskia_raster_surface_t {
     sk_sp<SkSurface> surface;
+};
+
+struct cskia_codec_t {
+    std::unique_ptr<SkCodec> codec;
 };
 
 static SkCanvas*           as_canvas(cskia_canvas_t* c)              { return reinterpret_cast<SkCanvas*>(c); }
@@ -122,6 +131,8 @@ static sk_sp<SkFontMgr> font_mgr() {
         return SkFontMgr_New_CoreText(nullptr);
 #elif defined(__ANDROID__)
         return SkFontMgr_New_Android(nullptr, SkFontScanner_Make_FreeType());
+#elif defined(__wasm__)
+        return SkFontMgr_New_Custom_Empty();
 #else
         return SkFontMgr_New_FontConfig(nullptr, SkFontScanner_Make_FreeType());
 #endif
@@ -515,6 +526,34 @@ int32_t cskia_image_get_width(const cskia_image_t* image) { return image ? as_im
 int32_t cskia_image_get_height(const cskia_image_t* image) { return image ? as_image(image)->height() : 0; }
 void cskia_image_ref(cskia_image_t* image) { SkSafeRef(as_image(image)); }
 void cskia_image_unref(cskia_image_t* image) { SkSafeUnref(as_image(image)); }
+
+// MARK: - SkCodec
+
+cskia_codec_t* cskia_codec_make_from_data(const void* data, size_t size) {
+    if (!data || size == 0) { return nullptr; }
+    // The overload without a decoder list takes the build's own — whichever
+    // SK_CODEC_DECODES_* libskia was compiled with — so this links on every
+    // platform, whatever codecs its Skia has.
+    std::unique_ptr<SkCodec> codec = SkCodec::MakeFromData(SkData::MakeWithCopy(data, size));
+    if (!codec) { return nullptr; }
+    auto* wrapper = new cskia_codec_t();
+    wrapper->codec = std::move(codec);
+    return wrapper;
+}
+
+void cskia_codec_delete(cskia_codec_t* codec) { delete codec; }
+
+int32_t cskia_codec_get_width(const cskia_codec_t* codec) { return codec->codec->dimensions().width(); }
+int32_t cskia_codec_get_height(const cskia_codec_t* codec) { return codec->codec->dimensions().height(); }
+
+bool cskia_codec_get_pixels(cskia_codec_t* codec, void* pixels, size_t row_bytes, int32_t color_type, int32_t alpha_type) {
+    if (!pixels) { return false; }
+    SkColorType ct = color_type == 1 ? kBGRA_8888_SkColorType : kRGBA_8888_SkColorType;
+    SkAlphaType at = clamp_enum<SkAlphaType>(alpha_type, kLastEnum_SkAlphaType);
+    if (at == kUnknown_SkAlphaType) { at = kPremul_SkAlphaType; }
+    SkImageInfo info = codec->codec->getInfo().makeColorType(ct).makeAlphaType(at);
+    return codec->codec->getPixels(info, pixels, row_bytes) == SkCodec::kSuccess;
+}
 
 // MARK: - Raster SkSurface
 

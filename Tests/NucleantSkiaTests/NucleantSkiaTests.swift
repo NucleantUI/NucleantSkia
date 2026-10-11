@@ -333,10 +333,13 @@ private func roboto() throws -> SkTypeface {
     #expect(SkFontMgr.makeFromFile("/no/such/font.ttf") == nil)
 }
 
+// A browser has no system fonts for Skia: faces come from files and data.
+#if !os(WASI)
 @Test func platformDefaultTypefaceExists() throws {
     let typeface = try #require(SkFontMgr.matchFamilyStyle(nil))
     #expect(!typeface.getFamilyName().isEmpty)
 }
+#endif
 
 @Test func fontMeasuresWithItsTypeface() throws {
     let font = SkFont(try roboto(), size: 20)

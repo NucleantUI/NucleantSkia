@@ -2,7 +2,7 @@
 //  cskia_api.h
 //  CSkia — plain-C mirror of Skia's core drawing API (m132), one handle per
 //  Skia class: SkCanvas, SkPaint, SkPath, SkFont, SkTypeface, SkShader,
-//  SkPathEffect, SkImage, plus a raster SkSurface.
+//  SkPathEffect, SkImage, SkCodec, plus a raster SkSurface.
 //
 //  Ownership follows Skia's own:
 //    * SkCanvas is borrowed — it belongs to the surface it came from.
@@ -12,6 +12,8 @@
 //      Skia; every `*_make*` returns one reference the caller owns, given
 //      back with `*_unref`. A setter that stores one (`paint_set_shader`,
 //      `font_set_typeface`) takes its own reference.
+//    * SkCodec is uniquely owned in Skia; `codec_make_from_data` hands it to
+//      the caller, given back with `codec_delete`.
 //
 //  Enum arguments are int32_t carrying the Skia enum's own value (the Swift
 //  side declares matching enums); out-of-range values are clamped.
@@ -36,6 +38,7 @@ typedef struct cskia_typeface_t    cskia_typeface_t;
 typedef struct cskia_shader_t      cskia_shader_t;
 typedef struct cskia_path_effect_t cskia_path_effect_t;
 typedef struct cskia_image_t       cskia_image_t;
+typedef struct cskia_codec_t       cskia_codec_t;
 typedef struct cskia_raster_surface_t cskia_raster_surface_t;
 
 /// SkMatrix, in SkMatrix's own order (kMScaleX … kMPersp2).
@@ -250,6 +253,20 @@ int32_t cskia_image_get_width(const cskia_image_t* image);
 int32_t cskia_image_get_height(const cskia_image_t* image);
 void cskia_image_ref(cskia_image_t* image);
 void cskia_image_unref(cskia_image_t* image);
+
+// MARK: - SkCodec
+
+/// SkCodec::MakeFromData over a copy of `size` bytes of `data`, with the
+/// decoders this Skia build was compiled with (PNG on every platform).
+/// NULL when none of them reads it.
+cskia_codec_t* cskia_codec_make_from_data(const void* data, size_t size);
+void cskia_codec_delete(cskia_codec_t* codec);
+int32_t cskia_codec_get_width(const cskia_codec_t* codec);
+int32_t cskia_codec_get_height(const cskia_codec_t* codec);
+/// SkCodec::getPixels — the whole image into `pixels`, `row_bytes` per row,
+/// `color_type` / `alpha_type` as for cskia_image_make_raster_copy. False
+/// unless every row decoded.
+bool cskia_codec_get_pixels(cskia_codec_t* codec, void* pixels, size_t row_bytes, int32_t color_type, int32_t alpha_type);
 
 // MARK: - Raster SkSurface (SkSurfaces::Raster)
 

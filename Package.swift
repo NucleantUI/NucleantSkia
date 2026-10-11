@@ -29,6 +29,11 @@ func getPlatformTarget() -> PackageDescription.Platform {
     if env["SWIFT_ANDROID_HOME"] != nil || env["ANDROID_BUILD"] != nil {
         return .android
     }
+    // WebAssembly (`swift build --swift-sdk <version>_wasm`) is a
+    // cross-compile too, opted into the same way as in NucleantVulkan.
+    if env["WASM_BUILD"] == "1" {
+        return .wasi
+    }
 #if os(Linux)
     return .linux
 #else
@@ -66,6 +71,74 @@ func getDependencies() -> [Package.Dependency] {
 }
 
 func skiaTargets() -> [Target] {
+    if platformTarget == .wasi {
+        // The browser: Skia's Graphite with its Dawn (WebGPU) backend, built
+        // for wasm32-wasip1 by scripts/build_skia_wasm.py into
+        // Dependencies/wasm (lib/ + include/, Dawn's webgpu.h under
+        // include/dawn-headers). Its webgpu.h calls resolve against
+        // NucleantVulkan's CWgpu — webgpu.h on the page's WebGPU device, the
+        // one the Vulkan implementation runs on — so cskia_webgpu.cpp gives
+        // the same cskia.h as cskia.cpp does with Ganesh on Vulkan elsewhere,
+        // drawing straight into the engine's VkImage. NucleantVulkan is a
+        // dependency here for CVulkan's header (VK_NUCLEANT_webgpu_objects).
+        let packageRoot = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+        let wasmRoot = packageRoot.appendingPathComponent("Dependencies/wasm")
+        let wasmLibDir = wasmRoot.appendingPathComponent("lib").path
+        let wasmIncludeDir = wasmRoot.appendingPathComponent("include").path
+        return [
+            .target(
+                name: "CSkia",
+                dependencies: [
+                    .product(name: "NucleantVulkan", package: "NucleantVulkan"),
+                ],
+                path: "Sources/CSkia",
+                sources: ["cskia_webgpu.cpp", "cskia_api.cpp"],
+                publicHeadersPath: "include",
+                cxxSettings: [
+                    .headerSearchPath("."),
+                    // The defines Skia's GN build gives its own clients
+                    // (skia_public), and the ones build_skia_wasm.py adds
+                    // for the WASI target, so headers read as they were built.
+                    .define("NDEBUG"),
+                    .define("SK_GRAPHITE"),
+                    .define("SK_DAWN"),
+                    .define("SK_ENABLE_PRECOMPILE"),
+                    .define("SKNX_NO_SIMD"),
+                    .define("SK_FORCE_8_BYTE_ALIGNMENT"),
+                    .define("SK_DISABLE_TRACING"),
+                    .define("SK_GAMMA_APPLY_TO_A8"),
+                    .define("SK_TYPEFACE_FACTORY_FREETYPE"),
+                    .define("SK_FONTMGR_FREETYPE_EMPTY_AVAILABLE"),
+                    .define("SK_BUILD_FOR_UNIX"),
+                    .define("_WASI_EMULATED_MMAN"),
+                    // No thread-local storage on wasm32-wasip1; the build
+                    // is single-threaded throughout.
+                    .define("thread_local", to: ""),
+                    .unsafeFlags([
+                        "-I\(wasmIncludeDir)",
+                        "-I\(wasmIncludeDir)/dawn-headers",
+                        "-Wno-keyword-macro",
+                        // As Skia is built: the SDK's libc++abi has no
+                        // exception runtime (__cxa_throw).
+                        "-fno-exceptions",
+                    ]),
+                ],
+                linkerSettings: [
+                    .linkedLibrary("skia"),
+                    .linkedLibrary("freetype2"),
+                    .linkedLibrary("png"),
+                    .linkedLibrary("zlib"),
+                    .linkedLibrary("skcms"),
+                    .linkedLibrary("c++"),
+                    .linkedLibrary("c++abi"),
+                    // libpng's error handling longjmps (wasm's setjmp
+                    // runtime, from the SDK's sysroot).
+                    .linkedLibrary("setjmp"),
+                    .unsafeFlags(["-L\(wasmLibDir)"]),
+                ]
+            ),
+        ]
+    }
     if platformTarget == .android {
         // Same vendored-static-archive shape as Linux below, but per-ABI:
         // Dependencies/android/<abi>/lib holds the Skia archives built for
