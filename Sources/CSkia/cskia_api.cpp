@@ -44,6 +44,15 @@
 #include "include/ports/SkFontScanner_FreeType.h"
 #endif
 
+#if defined(CSKIA_SVG)
+// Skia's SVG module. Its headers reach four of Skia's private ones, which
+// the Skia builds don't ship; they are in Sources/CSkia/skia (m144).
+#include "include/core/SkStream.h"
+#include "modules/svg/include/SkSVGDOM.h"
+#include "modules/svg/include/SkSVGRenderContext.h"
+#include "modules/svg/include/SkSVGSVG.h"
+#endif
+
 #include <algorithm>
 #include <cstring>
 #include <memory>
@@ -554,6 +563,64 @@ bool cskia_codec_get_pixels(cskia_codec_t* codec, void* pixels, size_t row_bytes
     SkImageInfo info = codec->codec->getInfo().makeColorType(ct).makeAlphaType(at);
     return codec->codec->getPixels(info, pixels, row_bytes) == SkCodec::kSuccess;
 }
+
+// MARK: - SkSVGDOM
+
+#if defined(CSKIA_SVG)
+
+static SkSVGDOM*       as_svg(cskia_svg_dom_t* d)       { return reinterpret_cast<SkSVGDOM*>(d); }
+static const SkSVGDOM* as_svg(const cskia_svg_dom_t* d) { return reinterpret_cast<const SkSVGDOM*>(d); }
+
+cskia_svg_dom_t* cskia_svg_dom_make_from_data(const void* data, size_t size) {
+    if (!data || size == 0) { return nullptr; }
+    SkMemoryStream stream(SkData::MakeWithCopy(data, size));
+    sk_sp<SkSVGDOM> dom = SkSVGDOM::Builder().setFontManager(font_mgr()).make(stream);
+    if (!dom || !dom->getRoot()) { return nullptr; }
+    return release_to<SkSVGDOM, cskia_svg_dom_t>(std::move(dom));
+}
+
+void cskia_svg_dom_unref(cskia_svg_dom_t* dom) { SkSafeUnref(as_svg(dom)); }
+
+void cskia_svg_dom_get_intrinsic_size(const cskia_svg_dom_t* dom, float* width, float* height) {
+    SkSize size = as_svg(dom)->getRoot()->intrinsicSize(SkSVGLengthContext(SkSize::Make(0, 0)));
+    if (width) { *width = size.width(); }
+    if (height) { *height = size.height(); }
+}
+
+bool cskia_svg_dom_get_view_box(const cskia_svg_dom_t* dom, float* x, float* y, float* width, float* height) {
+    const auto& box = as_svg(dom)->getRoot()->getViewBox();
+    if (!box.has_value()) { return false; }
+    if (x) { *x = box->x(); }
+    if (y) { *y = box->y(); }
+    if (width) { *width = box->width(); }
+    if (height) { *height = box->height(); }
+    return true;
+}
+
+void cskia_svg_dom_set_container_size(cskia_svg_dom_t* dom, float width, float height) {
+    as_svg(dom)->setContainerSize(SkSize::Make(width, height));
+}
+
+void cskia_svg_dom_render(const cskia_svg_dom_t* dom, cskia_canvas_t* canvas) {
+    if (!canvas) { return; }
+    as_svg(dom)->render(as_canvas(canvas));
+}
+
+#else
+
+// No SVG module in this Skia build: nothing parses, so there is never a DOM
+// for the rest to be called on.
+cskia_svg_dom_t* cskia_svg_dom_make_from_data(const void*, size_t) { return nullptr; }
+void cskia_svg_dom_unref(cskia_svg_dom_t*) {}
+void cskia_svg_dom_get_intrinsic_size(const cskia_svg_dom_t*, float* width, float* height) {
+    if (width) { *width = 0; }
+    if (height) { *height = 0; }
+}
+bool cskia_svg_dom_get_view_box(const cskia_svg_dom_t*, float*, float*, float*, float*) { return false; }
+void cskia_svg_dom_set_container_size(cskia_svg_dom_t*, float, float) {}
+void cskia_svg_dom_render(const cskia_svg_dom_t*, cskia_canvas_t*) {}
+
+#endif
 
 // MARK: - Raster SkSurface
 

@@ -2,13 +2,13 @@
 //  cskia_api.h
 //  CSkia — plain-C mirror of Skia's core drawing API (m132), one handle per
 //  Skia class: SkCanvas, SkPaint, SkPath, SkFont, SkTypeface, SkShader,
-//  SkPathEffect, SkImage, SkCodec, plus a raster SkSurface.
+//  SkPathEffect, SkImage, SkCodec, SkSVGDOM, plus a raster SkSurface.
 //
 //  Ownership follows Skia's own:
 //    * SkCanvas is borrowed — it belongs to the surface it came from.
 //    * SkPaint / SkPath / SkFont are values in Skia; here they are heap
 //      copies the caller owns: `*_new` / `*_copy` → `*_delete`.
-//    * SkTypeface / SkShader / SkPathEffect / SkImage are ref-counted in
+//    * SkTypeface / SkShader / SkPathEffect / SkImage / SkSVGDOM are ref-counted in
 //      Skia; every `*_make*` returns one reference the caller owns, given
 //      back with `*_unref`. A setter that stores one (`paint_set_shader`,
 //      `font_set_typeface`) takes its own reference.
@@ -40,6 +40,7 @@ typedef struct cskia_path_effect_t cskia_path_effect_t;
 typedef struct cskia_image_t       cskia_image_t;
 typedef struct cskia_codec_t       cskia_codec_t;
 typedef struct cskia_raster_surface_t cskia_raster_surface_t;
+typedef struct cskia_svg_dom_t     cskia_svg_dom_t;
 
 /// SkMatrix, in SkMatrix's own order (kMScaleX … kMPersp2).
 typedef struct cskia_matrix {
@@ -267,6 +268,24 @@ int32_t cskia_codec_get_height(const cskia_codec_t* codec);
 /// `color_type` / `alpha_type` as for cskia_image_make_raster_copy. False
 /// unless every row decoded.
 bool cskia_codec_get_pixels(cskia_codec_t* codec, void* pixels, size_t row_bytes, int32_t color_type, int32_t alpha_type);
+
+// MARK: - SkSVGDOM (Skia's SVG module)
+
+/// SkSVGDOM::Builder().make over a copy of the document's `size` bytes,
+/// <text> laid out with the platform's fonts. One new reference; NULL when
+/// it doesn't parse, and always on a build without Skia's SVG module (the
+/// browser's).
+cskia_svg_dom_t* cskia_svg_dom_make_from_data(const void* data, size_t size);
+void cskia_svg_dom_unref(cskia_svg_dom_t* dom);
+/// getRoot()->intrinsicSize: the root <svg>'s width and height in pixels,
+/// 0 for one given in percent (the default) — then the viewBox says the size.
+void cskia_svg_dom_get_intrinsic_size(const cskia_svg_dom_t* dom, float* width, float* height);
+/// getRoot()->getViewBox(): false when the root <svg> has none.
+bool cskia_svg_dom_get_view_box(const cskia_svg_dom_t* dom, float* x, float* y, float* width, float* height);
+/// SkSVGDOM::setContainerSize — the viewport `render` fills.
+void cskia_svg_dom_set_container_size(cskia_svg_dom_t* dom, float width, float height);
+/// SkSVGDOM::render into `canvas`.
+void cskia_svg_dom_render(const cskia_svg_dom_t* dom, cskia_canvas_t* canvas);
 
 // MARK: - Raster SkSurface (SkSurfaces::Raster)
 

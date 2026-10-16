@@ -390,3 +390,54 @@ private func roboto() throws -> SkTypeface {
     // Nothing drawn far right of a two-letter string.
     #expect(surface.readPixel(x: 110, y: 20) == SIMD4(255, 255, 255, 255))
 }
+
+// MARK: - SVG
+
+private func svg(_ source: String) -> SkSVGDOM? {
+    Array(source.utf8).withUnsafeBytes { SkSVGDOM.make($0) }
+}
+
+@Test func svgKnowsItsSizeAndViewBox() throws {
+    let sized = try #require(svg("<svg xmlns='http://www.w3.org/2000/svg' width='40' height='20'/>"))
+    #expect(sized.intrinsicSize() == SIMD2(40, 20))
+    #expect(sized.viewBox() == nil)
+
+    // No width/height: 100% of nothing, and the viewBox gives the size.
+    let boxed = try #require(svg("<svg xmlns='http://www.w3.org/2000/svg' viewBox='5 6 30 10'/>"))
+    #expect(boxed.intrinsicSize() == .zero)
+    let box = try #require(boxed.viewBox())
+    #expect(box.pos == SIMD2(5, 6) && box.size == SIMD2(30, 10))
+
+    #expect(svg("not an svg") == nil)
+    #expect(svg("") == nil)
+}
+
+@Test func svgRendersScaledIntoItsContainer() throws {
+    // Red over blue in a 10x10 viewBox, drawn into 40x40.
+    let dom = try #require(svg("""
+        <svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 10'>
+          <rect width='10' height='5' fill='#ff0000'/>
+          <rect y='5' width='10' height='5' fill='#0000ff'/>
+        </svg>
+        """))
+    let surface = try makeSurface(40, 40)
+    dom.setContainerSize(SIMD2(40, 40))
+    dom.render(surface.getCanvas())
+    #expect(isClose(surface.readPixel(x: 20, y: 10), SIMD4(255, 0, 0, 255)))
+    #expect(isClose(surface.readPixel(x: 20, y: 30), SIMD4(0, 0, 255, 255)))
+}
+
+@Test func svgTextUsesThePlatformsFonts() throws {
+    let dom = try #require(svg("""
+        <svg xmlns='http://www.w3.org/2000/svg' width='120' height='40'>
+          <text x='4' y='30' font-size='24' fill='black'>Hi</text>
+        </svg>
+        """))
+    let surface = try makeSurface(120, 40)
+    dom.setContainerSize(dom.intrinsicSize())
+    dom.render(surface.getCanvas())
+    let pixels = surface.readPixels()
+    let inked = stride(from: 0, to: pixels.count, by: 4).filter { pixels[$0] < 128 }.count
+    #expect(inked > 20)
+    #expect(surface.readPixel(x: 110, y: 20) == SIMD4(255, 255, 255, 255))
+}

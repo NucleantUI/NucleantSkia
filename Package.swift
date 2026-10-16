@@ -178,6 +178,11 @@ func skiaTargets() -> [Target] {
                     .define("SK_GANESH"),
                     .define("SK_VULKAN"),
                     .define("SK_USE_INTERNAL_VULKAN_HEADERS"),
+                    // Skia's SVG module (libsvg, with skshaper and
+                    // skunicode, among the archives linked below), and the
+                    // four private Skia headers its own headers reach.
+                    .define("CSKIA_SVG"),
+                    .headerSearchPath("skia"),
                     .unsafeFlags(["-I\(androidIncludeDir)"]),
                 ],
                 linkerSettings: [
@@ -231,6 +236,11 @@ func skiaTargets() -> [Target] {
                     .define("SK_GANESH"),
                     .define("SK_VULKAN"),
                     .define("SK_USE_INTERNAL_VULKAN_HEADERS"),
+                    // Skia's SVG module (libsvg, with skshaper and
+                    // skunicode, among the archives linked below), and the
+                    // four private Skia headers its own headers reach.
+                    .define("CSKIA_SVG"),
+                    .headerSearchPath("skia"),
                     // cskia.cpp does `#include "include/core/SkCanvas.h"` —
                     // relative to the skia repo root (include/ and modules/
                     // as siblings), matching Dependencies/linux/include/'s
@@ -259,17 +269,45 @@ func skiaTargets() -> [Target] {
             name: "Skia",
             path: "Dependencies/apple/Skia.xcframework"
         ),
+        // Skia's SVG module and what it links: <text> is shaped through
+        // skshaper, which takes ICU from skunicode (ICU itself is inside
+        // libskunicode_icu). Built with the same Skia as libskia; each its
+        // own xcframework, since one links one library.
+        .binaryTarget(
+            name: "SkiaSVG",
+            path: "Dependencies/apple/SkiaSVG.xcframework"
+        ),
+        .binaryTarget(
+            name: "SkiaShaper",
+            path: "Dependencies/apple/SkiaShaper.xcframework"
+        ),
+        .binaryTarget(
+            name: "SkiaUnicodeICU",
+            path: "Dependencies/apple/SkiaUnicodeICU.xcframework"
+        ),
+        .binaryTarget(
+            name: "SkiaUnicodeCore",
+            path: "Dependencies/apple/SkiaUnicodeCore.xcframework"
+        ),
         // Plain-C shim over Skia's C++ API: Vulkan GrDirectContext,
-        // VkImage-wrapping SkSurface, flush, basic draw + text.
+        // VkImage-wrapping SkSurface, flush, basic draw + text, SVG.
         .target(
             name: "CSkia",
             dependencies: [
-                "Skia"
+                "Skia",
+                "SkiaSVG",
+                "SkiaShaper",
+                "SkiaUnicodeICU",
+                "SkiaUnicodeCore",
             ],
             cxxSettings: [
                 .define("SK_GANESH"),
                 .define("SK_VULKAN"),
-                .define("SK_USE_INTERNAL_VULKAN_HEADERS")
+                .define("SK_USE_INTERNAL_VULKAN_HEADERS"),
+                // The four private Skia headers the SVG module's headers
+                // reach, which the xcframework doesn't ship.
+                .define("CSKIA_SVG"),
+                .headerSearchPath("skia"),
             ],
             linkerSettings: [
                 .linkedLibrary("c++"),

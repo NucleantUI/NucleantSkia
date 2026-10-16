@@ -257,7 +257,8 @@ How it's laid out (same shape as NucleantThorVG):
 - [ ] SkRegion
 - [ ] SkData / SkStream
 - [ ] SkCodec (animated, frames)
-- [ ] SkSVGDOM (libsvg is linked)
+- [x] SkSVGDOM — `make` (Builder, platform fonts for <text>), `intrinsicSize`, `viewBox`, `setContainerSize`, `render`. Apple: libsvg/skshaper/skunicode as their own xcframeworks (one library each), plus four private Skia headers its headers include (`Sources/CSkia/skia`); Linux/Android link them with the rest; the browser's Skia has none (`make` is nil)
+- [ ] SkSVGDOM `renderNode`, `findNodeById`, resource provider (external images)
 - [ ] SkDocument / SkPDF
 - [ ] SkRuntimeEffect (SkSL color filters / blenders)
 
