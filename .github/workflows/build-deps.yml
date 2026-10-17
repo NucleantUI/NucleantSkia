@@ -171,7 +171,9 @@ jobs:
           swift sdk install \
             "https://download.swift.org/swift-${SWIFT_VERSION}-release/android-sdk/${release}/${release}_android.artifactbundle.tar.gz" \
             --checksum d160cc3206dd1886dae3fef2337af5e25ec034692cd0ec225721c56cc69da7f5
-          "$HOME/.swiftpm/swift-sdks/${release}_android.artifactbundle/swift-android/scripts/setup-android-sdk.sh"
+          # Links the NDK's sysroot into the SDK.
+          setup=$(find "$HOME/.swiftpm/swift-sdks/${release}_android.artifactbundle" -name setup-android-sdk.sh | head -1)
+          test -n "$setup" && "$setup"
       # Cross-compiled: builds and links the tests, which no device runs here.
       - name: Build against it
         env:
