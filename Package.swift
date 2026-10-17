@@ -59,6 +59,187 @@ func androidABI() -> String {
     }
 }
 
+/// Skia prebuilt as one archive per platform: `Skia.xcframework.zip` on
+/// Apple's platforms, a static-library artifact bundle (SE-0482) on the
+/// others — see scripts/make_artifactbundle.py. This is its file name, the
+/// same on a GitHub release and under Artifacts/.
+func prebuiltSkiaArchive() -> String {
+    switch platformTarget {
+    case .wasi:
+        return "skia-wasm32.artifactbundle.zip"
+    case .android:
+        return "skia-android-\(androidABI()).artifactbundle.zip"
+    case .linux:
+        // Linux builds are native, so the host's architecture is the target's.
+#if arch(arm64)
+        return "skia-linux-aarch64.artifactbundle.zip"
+#else
+        return "skia-linux-x86_64.artifactbundle.zip"
+#endif
+    default:
+        return "Skia.xcframework.zip"
+    }
+}
+
+/// Each prebuilt archive on this release's GitHub release, by file name: its
+/// URL and checksum. Written here by .github/workflows/release.yml on the
+/// release commit — in this file, not one it reads, because SwiftPM caches a
+/// manifest's evaluation by its text (and environment), not by the files it
+/// looks at. Empty on master.
+let releasedSkia: [String: (url: String, checksum: String)] = [:]
+
+/// The prebuilt Skia, when there is one, as the "Skia" binary target:
+///   * on a release commit, the archive from the GitHub release — SwiftPM
+///     downloads only the one declared here;
+///   * with NUCLEANT_SKIA_ARTIFACTS=1, Artifacts/<archive>: the archives
+///     .github/workflows/build-deps.yml builds, put there to build and test
+///     against;
+/// nil: neither, so Skia comes from the vendored Dependencies/.
+func prebuiltSkiaTarget() -> Target? {
+    let archive = prebuiltSkiaArchive()
+    if let release = releasedSkia[archive] {
+        return .binaryTarget(name: "Skia", url: release.url, checksum: release.checksum)
+    }
+    if ProcessInfo.processInfo.environment["NUCLEANT_SKIA_ARTIFACTS"] == "1" {
+        return .binaryTarget(name: "Skia", path: "Artifacts/\(archive)")
+    }
+    return nil
+}
+
+/// CSkia over the prebuilt Skia. No unsafeFlags anywhere — SwiftPM refuses
+/// them in a package depended on by version — so the binary target gives the
+/// header search paths and the library, and the rest are plain settings.
+func prebuiltSkiaTargets(_ skia: Target) -> [Target] {
+    switch platformTarget {
+    case .wasi:
+        return [
+            skia,
+            .target(
+                name: "CSkia",
+                dependencies: [
+                    "Skia",
+                    .product(name: "NucleantVulkan", package: "NucleantVulkan"),
+                ],
+                path: "Sources/CSkia",
+                // cskia_noexcept.cpp: Skia is built without exceptions, as
+                // -fno-exceptions would build CSkia; it stands in for the
+                // exception runtime the SDK's libc++abi lacks.
+                sources: ["cskia_webgpu.cpp", "cskia_api.cpp", "cskia_noexcept.cpp"],
+                publicHeadersPath: "include",
+                cxxSettings: [
+                    .headerSearchPath("."),
+                    // The defines Skia's GN build gives its own clients, and
+                    // the ones build_skia_wasm.py adds for the WASI target.
+                    .define("NDEBUG"),
+                    .define("SK_GRAPHITE"),
+                    .define("SK_DAWN"),
+                    .define("SK_ENABLE_PRECOMPILE"),
+                    .define("SKNX_NO_SIMD"),
+                    .define("SK_FORCE_8_BYTE_ALIGNMENT"),
+                    .define("SK_DISABLE_TRACING"),
+                    .define("SK_GAMMA_APPLY_TO_A8"),
+                    .define("SK_TYPEFACE_FACTORY_FREETYPE"),
+                    .define("SK_FONTMGR_FREETYPE_EMPTY_AVAILABLE"),
+                    .define("SK_BUILD_FOR_UNIX"),
+                    .define("SK_DISABLE_LEGACY_NONCONST_SERIAL_PROCS"),
+                    .define("SK_SUPPORT_PDF"),
+                    .define("SK_XML"),
+                    .define("SK_ENABLE_SVG"),
+                    .define("SK_SHAPER_HARFBUZZ_AVAILABLE"),
+                    .define("SK_SHAPER_PRIMITIVE_AVAILABLE"),
+                    .define("SK_SHAPER_UNICODE_AVAILABLE"),
+                    .define("SK_UNICODE_AVAILABLE"),
+                    .define("SK_UNICODE_ICU_IMPLEMENTATION"),
+                    .define("SK_HAS_WUFFS_LIBRARY"),
+                    .define("_WASI_EMULATED_MMAN"),
+                    .define("thread_local", to: ""),
+                    .define("CSKIA_SVG"),
+                    .headerSearchPath("skia"),
+                ],
+                linkerSettings: [
+                    .linkedLibrary("c++"),
+                    .linkedLibrary("c++abi"),
+                    .linkedLibrary("setjmp"),
+                ]
+            ),
+        ]
+    case .android:
+        return [
+            skia,
+            .target(
+                name: "CSkia",
+                dependencies: ["Skia"],
+                path: "Sources/CSkia",
+                sources: ["cskia.cpp", "cskia_api.cpp"],
+                publicHeadersPath: "include",
+                cxxSettings: [
+                    .headerSearchPath("."),
+                    .define("SK_GANESH"),
+                    .define("SK_VULKAN"),
+                    .define("SK_USE_INTERNAL_VULKAN_HEADERS"),
+                    .define("CSKIA_SVG"),
+                    .headerSearchPath("skia"),
+                ],
+                linkerSettings: [
+                    .linkedLibrary("c++_shared"),
+                    .linkedLibrary("m"),
+                    .linkedLibrary("z"),
+                    .linkedLibrary("log"),
+                ]
+            ),
+        ]
+    case .linux:
+        return [
+            skia,
+            .target(
+                name: "CSkia",
+                dependencies: ["Skia"],
+                path: "Sources/CSkia",
+                sources: ["cskia.cpp", "cskia_api.cpp"],
+                publicHeadersPath: "include",
+                cxxSettings: [
+                    .headerSearchPath("."),
+                    .define("SK_GANESH"),
+                    .define("SK_VULKAN"),
+                    .define("SK_USE_INTERNAL_VULKAN_HEADERS"),
+                    .define("CSKIA_SVG"),
+                    .headerSearchPath("skia"),
+                ],
+                linkerSettings: [
+                    .linkedLibrary("fontconfig"),
+                    .linkedLibrary("pthread"),
+                    .linkedLibrary("dl"),
+                    .linkedLibrary("rt"),
+                    .linkedLibrary("m"),
+                    .linkedLibrary("z"),
+                ]
+            ),
+        ]
+    default:
+        return [
+            skia,
+            .target(
+                name: "CSkia",
+                dependencies: ["Skia"],
+                cxxSettings: [
+                    .define("SK_GANESH"),
+                    .define("SK_VULKAN"),
+                    .define("SK_USE_INTERNAL_VULKAN_HEADERS"),
+                    .define("CSKIA_SVG"),
+                    .headerSearchPath("skia"),
+                ],
+                linkerSettings: [
+                    .linkedLibrary("c++"),
+                    .linkedFramework("CoreFoundation"),
+                    .linkedFramework("CoreGraphics"),
+                    .linkedFramework("CoreText"),
+                    .linkedFramework("ImageIO")
+                ]
+            ),
+        ]
+    }
+}
+
 func getDependencies() -> [Package.Dependency] {
     if devMode {
         return [
@@ -71,6 +252,9 @@ func getDependencies() -> [Package.Dependency] {
 }
 
 func skiaTargets() -> [Target] {
+    if let skia = prebuiltSkiaTarget() {
+        return prebuiltSkiaTargets(skia)
+    }
     if platformTarget == .wasi {
         // The browser: Skia's Graphite with its Dawn (WebGPU) backend, built
         // for wasm32-wasip1 by scripts/build_skia_wasm.py into

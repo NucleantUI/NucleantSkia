@@ -12,7 +12,8 @@ validation error fails the run.
 
     python3 scripts/run_wasm_tests.py [--chrome PATH] [-- <test arguments>]
 
-Needs Dependencies/wasm (scripts/build_skia_wasm.py), the wasm Swift SDK with
+Needs Dependencies/wasm (scripts/build_skia_wasm.py) or the prebuilt
+Artifacts/skia-wasm32.artifactbundle.zip, the wasm Swift SDK with
 its matching toolchain, and NucleantVulkan's Web/naga_webgpu.wasm
 (NucleantVulkan/scripts/build_naga_wasm.py). Chrome: --chrome, else $CHROME,
 else the usual install locations (any Chrome with WebGPU and JSPI, i.e. 137+).
@@ -86,8 +87,10 @@ def nucleant_vulkan_web() -> Path:
 
 
 def build_tests() -> Path:
-    if not (PACKAGE_ROOT / "Dependencies" / "wasm" / "lib" / "libskia.a").is_file():
-        sys.exit("error: Dependencies/wasm/lib/libskia.a is missing; run scripts/build_skia_wasm.py")
+    if not ((PACKAGE_ROOT / "Dependencies" / "wasm" / "lib" / "libskia.a").is_file()
+            or (PACKAGE_ROOT / "Artifacts" / "skia-wasm32.artifactbundle.zip").is_file()):
+        sys.exit("error: no wasm Skia: neither Dependencies/wasm/lib/libskia.a (scripts/build_skia_wasm.py) "
+                 "nor Artifacts/skia-wasm32.artifactbundle.zip (scripts/make_artifactbundle.py)")
     swift, sdk = find_wasm_sdk()
     SCRATCH.mkdir(parents=True, exist_ok=True)
     toolset = SCRATCH / "test-toolset.json"
