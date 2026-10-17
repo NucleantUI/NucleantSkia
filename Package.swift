@@ -185,6 +185,8 @@ func prebuiltSkiaTargets(_ skia: Target) -> [Target] {
                     .linkedLibrary("m"),
                     .linkedLibrary("z"),
                     .linkedLibrary("log"),
+                    // AHardwareBuffer_*, which Skia's Android Vulkan code calls.
+                    .linkedLibrary("android"),
                 ]
             ),
         ]
