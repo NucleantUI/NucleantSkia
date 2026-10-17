@@ -1,12 +1,13 @@
 # Builds Skia for every platform from source, packages it as the archives a
 # `.binaryTarget` takes, and builds and tests NucleantSkia against them — one
-# machine per platform, which builds, packages and tests:
+# machine per platform (Linux: per architecture), a step per architecture:
 #
-#   apple    Skia.xcframework.zip                        macOS + iOS + simulator
-#   linux    skia-linux-x86_64.artifactbundle.zip        \  static-library
-#   android  skia-android-arm64-v8a.artifactbundle.zip    | artifact bundles
-#            skia-android-x86_64.artifactbundle.zip       | (SE-0482), one per
-#   wasm     skia-wasm32.artifactbundle.zip              /  platform/arch
+#   apple    Skia.xcframework.zip                       macOS + iOS + simulator
+#   linux    skia-linux-x86_64.artifactbundle.zip       \
+#            skia-linux-aarch64.artifactbundle.zip       |  static-library
+#   android  skia-android-arm64-v8a.artifactbundle.zip   |  artifact bundles
+#            skia-android-x86_64.artifactbundle.zip      |  (SE-0482)
+#   wasm     skia-wasm32.artifactbundle.zip             /
 #
 # The archives are this run's artifacts ("skia-*"). Run it by hand to check
 # that the dependencies still build; release.yml runs it for each tag and
@@ -83,11 +84,18 @@ jobs:
           swift test
 
   linux:
+    name: linux (${{ matrix.arch }})
     if: inputs.platform == '' || inputs.platform == 'all' || inputs.platform == 'linux'
-    # x86_64, as Dependencies/linux, and the one Linux architecture
-    # NucleantVulkan vendors wgpu-native for. In Swift's own image, which has
-    # the toolchain; Ubuntu 24.04's GCC builds Skia, as Dependencies/linux is.
-    runs-on: ubuntu-24.04
+    # A machine per architecture: a Linux machine builds and tests its own.
+    # In Swift's own image, which has the toolchain; Ubuntu 24.04's GCC builds
+    # Skia, as Dependencies/linux is.
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { arch: x86_64, runner: ubuntu-24.04 }
+          - { arch: aarch64, runner: ubuntu-24.04-arm }
+    runs-on: ${{ matrix.runner }}
     container: swift:6.3.3-noble
     timeout-minutes: 360
     steps:
@@ -111,24 +119,28 @@ jobs:
           mv ../skia-python/depot_tools/ninja ../skia-python/depot_tools/ninja.bak
           mv ../skia-python/depot_tools/gn ../skia-python/depot_tools/gn.bak
           echo "$(cd ../skia-python/skia && pwd)/bin" >> "$GITHUB_PATH"
-      - name: Build Skia
+      - name: Build Skia ${{ matrix.arch }}
         run: |
           # Only this machine's build goes into the bundle, not the committed archives.
           rm -rf Dependencies/linux/lib Dependencies/linux/include
           python3 scripts/build_skia.py
-      - name: Package
+      - name: Package ${{ matrix.arch }}
         run: >
           python3 scripts/make_artifactbundle.py
           --lib-dir Dependencies/linux/lib --include Dependencies/linux/include
-          --triple x86_64-unknown-linux-gnu
-          --name skia-linux-x86_64 --output dist --version "$VERSION" --ar ar
+          --triple ${{ matrix.arch }}-unknown-linux-gnu
+          --name skia-linux-${{ matrix.arch }} --output dist --version "$VERSION" --ar ar
       - uses: actions/upload-artifact@v7
         with:
-          name: skia-linux
-          path: dist/skia-linux-x86_64.artifactbundle.zip
-      - name: Test against it
+          name: skia-linux-${{ matrix.arch }}
+          path: dist/skia-linux-${{ matrix.arch }}.artifactbundle.zip
+      # Not on aarch64 yet: the tests link NucleantVulkan from its master,
+      # whose vendored wgpu-native is x86_64 only. Its prebuilt aarch64 bundle
+      # covers that once NucleantSkia depends on a NucleantVulkan release.
+      - name: Test against it, ${{ matrix.arch }}
+        if: matrix.arch == 'x86_64'
         run: |
-          mkdir -p Artifacts && cp dist/skia-linux-x86_64.artifactbundle.zip Artifacts/
+          mkdir -p Artifacts && cp dist/skia-linux-${{ matrix.arch }}.artifactbundle.zip Artifacts/
           swift test
 
   android:
