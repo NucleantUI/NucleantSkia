@@ -1,0 +1,73 @@
+# For each new tag: builds and tests Skia for every platform (build-deps.yml),
+# attaches the archives to the tag's GitHub release, and moves the tag to a
+# release commit made on top of the tagged one:
+#
+#   * Package.swift's `releasedSkia` filled in — each archive's release URL
+#     and checksum, which it turns into the "Skia" binary target, so SwiftPM
+#     downloads only the platform (and architecture) being built;
+#   * no Dependencies/ — the vendored archives stay on master, not in the
+#     release.
+#
+# The checksum is the archive's SHA-256, what `swift package compute-checksum`
+# gives. A tag pushed with GITHUB_TOKEN starts no workflow, so moving the tag
+# does not run this again.
+
+name: release
+
+on:
+  push:
+    tags: ["*"]
+
+permissions:
+  contents: write
+
+jobs:
+  deps:
+    uses: ./.github/workflows/build-deps.yml
+    with:
+      version: ${{ github.ref_name }}
+
+  release:
+    needs: deps
+    runs-on: ubuntu-24.04
+    env:
+      TAG: ${{ github.ref_name }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: skia-*
+          path: dist
+          merge-multiple: true
+      - name: Release with the archives
+        run: |
+          ls -l dist
+          gh release view "$TAG" >/dev/null 2>&1 || gh release create "$TAG" --title "$TAG" --verify-tag --notes "Prebuilt Skia for every platform; SwiftPM downloads the one it builds for."
+          gh release upload "$TAG" dist/* --clobber
+      - name: Release commit
+        run: |
+          python3 - <<'EOF'
+          import hashlib, os, pathlib
+          base = f"https://github.com/{os.environ['GITHUB_REPOSITORY']}/releases/download/{os.environ['TAG']}"
+          entries = "".join(
+              f'    "{path.name}": (\n'
+              f'        url: "{base}/{path.name}",\n'
+              f'        checksum: "{hashlib.sha256(path.read_bytes()).hexdigest()}"\n'
+              f'    ),\n'
+              for path in sorted(pathlib.Path("dist").glob("*.zip"))
+          )
+          manifest = pathlib.Path("Package.swift")
+          empty = "let releasedSkia: [String: (url: String, checksum: String)] = [:]\n"
+          text = manifest.read_text()
+          assert empty in text, "Package.swift has no empty releasedSkia to fill in"
+          manifest.write_text(text.replace(empty, empty.replace("[:]", "[\n" + entries + "]")))
+          EOF
+          git diff Package.swift
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm -r -q Dependencies
+          git add Package.swift
+          git commit -q -m "Release $TAG: Skia from the release's archives"
+          git tag -f "$TAG"
+          git push -f origin "refs/tags/$TAG"

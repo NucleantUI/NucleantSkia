@@ -85,27 +85,31 @@ func prebuiltSkiaArchive() -> String {
     }
 }
 
-/// Each prebuilt archive on this release's GitHub release, by file name: its
-/// URL and checksum. Written here by .github/workflows/release.yml on the
-/// release commit — in this file, not one it reads, because SwiftPM caches a
-/// manifest's evaluation by its text (and environment), not by the files it
-/// looks at. Empty on master.
+/// Each prebuilt archive on the latest GitHub release, by file name: its URL
+/// and checksum. Written here by .github/workflows/release.yml, which commits
+/// it to master with the release — so master and the release's tag both
+/// build from exactly the archives on that release. In this file, not one it
+/// reads, because SwiftPM caches a manifest's evaluation by its text (and
+/// environment), not by the files it looks at. Empty only before the first
+/// release.
 let releasedSkia: [String: (url: String, checksum: String)] = [:]
 
 /// The prebuilt Skia, when there is one, as the "Skia" binary target:
-///   * on a release commit, the archive from the GitHub release — SwiftPM
-///     downloads only the one declared here;
 ///   * with NUCLEANT_SKIA_ARTIFACTS=1, Artifacts/<archive>: the archives
 ///     .github/workflows/build-deps.yml builds, put there to build and test
 ///     against;
+///   * after a release, the archive from it — SwiftPM downloads only the
+///     one declared here;
 /// nil: neither, so Skia comes from the vendored Dependencies/.
 func prebuiltSkiaTarget() -> Target? {
     let archive = prebuiltSkiaArchive()
-    if let release = releasedSkia[archive] {
-        return .binaryTarget(name: "Skia", url: release.url, checksum: release.checksum)
-    }
+    // Artifacts/ first: the archives build-deps.yml has just built, about to
+    // replace the release's.
     if ProcessInfo.processInfo.environment["NUCLEANT_SKIA_ARTIFACTS"] == "1" {
         return .binaryTarget(name: "Skia", path: "Artifacts/\(archive)")
+    }
+    if let release = releasedSkia[archive] {
+        return .binaryTarget(name: "Skia", url: release.url, checksum: release.checksum)
     }
     return nil
 }
