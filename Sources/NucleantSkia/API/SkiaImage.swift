@@ -58,8 +58,7 @@ public extension SkiaImage {
     }
 
     /// Encoded as `format`; `quality` 0…100 for JPEG and WebP (WebP 100 is
-    /// lossless). nil when it can't be — always in the browser, whose Skia
-    /// has no encoders.
+    /// lossless). nil when it can't be.
     func encode(_ format: SkEncodedImageFormat = .png, quality: Int32 = 100) -> [UInt8]? {
         guard let data = cskia_image_encode(base, format.rawValue, quality) else { return nil }
         defer { cskia_data_unref(data) }

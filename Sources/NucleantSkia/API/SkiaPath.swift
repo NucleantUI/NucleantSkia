@@ -291,7 +291,7 @@ public extension SkiaPath {
         Array(SkPathIter(self, forceClose: forceClose))
     }
 
-    // MARK: PathOps — nil in the browser, whose Skia has none
+    // MARK: PathOps
 
     /// The two paths combined by `op`; nil when it can't be computed.
     func op<P: SkiaPath>(_ other: P, _ op: SkPathOp) -> SkPath? {
@@ -388,7 +388,7 @@ public final class SkPathMeasure {
 }
 
 /// SkOpBuilder — any number of paths, each with its op, resolved at once
-/// (faster than chaining `op`). Resolves to nil in the browser.
+/// (faster than chaining `op`).
 public final class SkOpBuilder {
     private let base: OpaquePointer
 

@@ -85,6 +85,13 @@ func skiaTargets() -> [Target] {
         let wasmRoot = packageRoot.appendingPathComponent("Dependencies/wasm")
         let wasmLibDir = wasmRoot.appendingPathComponent("lib").path
         let wasmIncludeDir = wasmRoot.appendingPathComponent("include").path
+        // Every archive the build made — Skia, its modules (svg, skshaper,
+        // skunicode, …) and the third-party libraries — as on Linux. wasm-ld
+        // resolves between archives in any order, so no group is needed.
+        let archiveNames: [String] = (try? FileManager.default.contentsOfDirectory(atPath: wasmLibDir))?
+            .filter { $0.hasSuffix(".a") }
+            .map { String($0.dropFirst(3).dropLast(2)) } // libFoo.a -> Foo
+            .sorted() ?? []
         return [
             .target(
                 name: "CSkia",
@@ -110,10 +117,24 @@ func skiaTargets() -> [Target] {
                     .define("SK_TYPEFACE_FACTORY_FREETYPE"),
                     .define("SK_FONTMGR_FREETYPE_EMPTY_AVAILABLE"),
                     .define("SK_BUILD_FOR_UNIX"),
+                    .define("SK_DISABLE_LEGACY_NONCONST_SERIAL_PROCS"),
+                    .define("SK_SUPPORT_PDF"),
+                    .define("SK_XML"),
+                    .define("SK_ENABLE_SVG"),
+                    .define("SK_SHAPER_HARFBUZZ_AVAILABLE"),
+                    .define("SK_SHAPER_PRIMITIVE_AVAILABLE"),
+                    .define("SK_SHAPER_UNICODE_AVAILABLE"),
+                    .define("SK_UNICODE_AVAILABLE"),
+                    .define("SK_UNICODE_ICU_IMPLEMENTATION"),
+                    .define("SK_HAS_WUFFS_LIBRARY"),
                     .define("_WASI_EMULATED_MMAN"),
                     // No thread-local storage on wasm32-wasip1; the build
                     // is single-threaded throughout.
                     .define("thread_local", to: ""),
+                    // Skia's SVG module, and the four private Skia headers
+                    // its own headers reach — as on every platform.
+                    .define("CSKIA_SVG"),
+                    .headerSearchPath("skia"),
                     .unsafeFlags([
                         "-I\(wasmIncludeDir)",
                         "-I\(wasmIncludeDir)/dawn-headers",
@@ -123,12 +144,7 @@ func skiaTargets() -> [Target] {
                         "-fno-exceptions",
                     ]),
                 ],
-                linkerSettings: [
-                    .linkedLibrary("skia"),
-                    .linkedLibrary("freetype2"),
-                    .linkedLibrary("png"),
-                    .linkedLibrary("zlib"),
-                    .linkedLibrary("skcms"),
+                linkerSettings: archiveNames.map { .linkedLibrary($0) } + [
                     .linkedLibrary("c++"),
                     .linkedLibrary("c++abi"),
                     // libpng's error handling longjmps (wasm's setjmp

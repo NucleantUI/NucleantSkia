@@ -52,11 +52,6 @@ private let r = SIMD4<UInt8>(255, 0, 0, 255), g = SIMD4<UInt8>(0, 255, 0, 255), 
     #expect(img.makeSubset(origin: SIMD2(1, 1), size: SIMD2(2, 2)) == nil)
 }
 
-#if os(WASI)
-@Test func theBrowserHasNoEncoders() throws {
-    #expect(try image([r], width: 1).encode(.png) == nil)
-}
-#else
 @Test func encodeAndDecodeAgain() throws {
     let surface = try makeSurface(8, 8)
     surface.getCanvas().drawRect(pos: SIMD2(0, 0), size: SIMD2(4, 8), paint: SkPaint(color: red))
@@ -74,7 +69,6 @@ private let r = SIMD4<UInt8>(255, 0, 0, 255), g = SIMD4<UInt8>(0, 255, 0, 255), 
     // Lossless WebP keeps the pixels exactly.
     #expect(SkImage(encoded: webp)?.readPixels(alphaType: .unpremul) == snapshot.readPixels(alphaType: .unpremul))
 }
-#endif
 
 @Test func drawPartOfAnImageWithSampling() throws {
     // Red | blue; the right half fills the whole destination.

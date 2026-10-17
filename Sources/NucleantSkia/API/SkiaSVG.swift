@@ -6,8 +6,6 @@ import CSkia
 
 /// SkSVGDOM — an SVG document parsed by Skia's SVG module, drawn into any
 /// canvas. Ref-counted in Skia; this holds one reference.
-///
-/// The browser's Skia has no SVG module: `make` is always `nil` there.
 public final class SkSVGDOM {
     let base: OpaquePointer
 

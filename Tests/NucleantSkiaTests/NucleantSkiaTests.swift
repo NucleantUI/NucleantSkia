@@ -397,12 +397,6 @@ private func svg(_ source: String) -> SkSVGDOM? {
     Array(source.utf8).withUnsafeBytes { SkSVGDOM.make($0) }
 }
 
-// The browser's Skia has no SVG module: nothing parses there.
-#if os(WASI)
-@Test func svgIsUnavailableInTheBrowser() {
-    #expect(svg("<svg xmlns='http://www.w3.org/2000/svg' width='40' height='20'/>") == nil)
-}
-#else
 @Test func svgKnowsItsSizeAndViewBox() throws {
     let sized = try #require(svg("<svg xmlns='http://www.w3.org/2000/svg' width='40' height='20'/>"))
     #expect(sized.intrinsicSize() == SIMD2(40, 20))
@@ -433,6 +427,8 @@ private func svg(_ source: String) -> SkSVGDOM? {
     #expect(isClose(surface.readPixel(x: 20, y: 30), SIMD4(0, 0, 255, 255)))
 }
 
+// <text> needs the platform's fonts, and a browser has none.
+#if !os(WASI)
 @Test func svgTextUsesThePlatformsFonts() throws {
     let dom = try #require(svg("""
         <svg xmlns='http://www.w3.org/2000/svg' width='120' height='40'>

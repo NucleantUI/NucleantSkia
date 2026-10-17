@@ -121,7 +121,7 @@ How it's laid out (same shape as NucleantThorVG):
 - [x] transform (SkMatrix)
 - [x] serialize / readFromMemory (`serialize()`, `SkPath(serialized:)`)
 - [x] SkParsePath — FromSVGString / ToSVGString (`SkPath(svg:)`, `toSVGString(relative:)`)
-- [x] PathOps — Op (`op(_:_:)`), Simplify, AsWinding, SkOpBuilder — nil in the browser, whose Skia has no PathOps
+- [x] PathOps — Op (`op(_:_:)`), Simplify, AsWinding, SkOpBuilder
 - [ ] SkPathBuilder
 - [x] SkPathMeasure (length, getPosTan, getSegment, isClosed, nextContour)
 
@@ -225,7 +225,7 @@ How it's laid out (same shape as NucleantThorVG):
 - [x] colorType / alphaType / isOpaque
 - [x] readPixels (any rect) / peekPixels (`withPeekedPixels`)
 - [x] makeSubset / makeRasterImage
-- [x] encode — PNG, JPEG, WebP (`encode(_:quality:)`) — nil in the browser, whose Skia has no encoders
+- [x] encode — PNG, JPEG, WebP (`encode(_:quality:)`)
 - [ ] SkImages::TextureFromTexture — wrap a VkImage as an image (GPU)
 - [ ] makeTextureImage
 
@@ -260,7 +260,7 @@ How it's laid out (same shape as NucleantThorVG):
 - [ ] SkRegion
 - [ ] SkData / SkStream
 - [ ] SkCodec (animated, frames)
-- [x] SkSVGDOM — `make` (Builder, platform fonts for <text>), `intrinsicSize`, `viewBox`, `setContainerSize`, `render`. Apple: libsvg/skshaper/skunicode as their own xcframeworks (one library each), plus four private Skia headers its headers include (`Sources/CSkia/skia`); Linux/Android link them with the rest; the browser's Skia has none (`make` is nil)
+- [x] SkSVGDOM — `make` (Builder, platform fonts for <text>), `intrinsicSize`, `viewBox`, `setContainerSize`, `render`. Apple: libsvg/skshaper/skunicode as their own xcframeworks (one library each), plus four private Skia headers its headers include (`Sources/CSkia/skia`); Linux/Android/wasm link them with the rest
 - [ ] SkSVGDOM `renderNode`, `findNodeById`, resource provider (external images)
 - [ ] SkDocument / SkPDF
 - [ ] SkRuntimeEffect (SkSL color filters / blenders)

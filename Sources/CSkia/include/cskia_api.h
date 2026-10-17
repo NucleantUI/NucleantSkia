@@ -284,8 +284,6 @@ void cskia_path_iter_delete(cskia_path_iter_t* iter);
 int32_t cskia_path_iter_next(cskia_path_iter_t* iter, float* points, float* conic_weight);
 
 // MARK: - PathOps (SkPathOps.h)
-//
-// Not in the browser's Skia: there every one of these fails.
 
 /// `op`: 0 difference, 1 intersect, 2 union, 3 xor, 4 reverse difference.
 /// False (out unchanged) when it can't be computed.
@@ -501,8 +499,7 @@ cskia_image_t* cskia_image_make_subset(const cskia_image_t* image, int32_t x, in
 /// Decoded into memory (a lazy or GPU image); the same image if it already is.
 cskia_image_t* cskia_image_make_raster_image(const cskia_image_t* image);
 /// Encoded: `format` 0 PNG, 1 JPEG, 2 WebP; `quality` 0…100 (JPEG, WebP;
-/// WebP 100 is lossless). NULL when it can't be — and always in the
-/// browser, whose Skia has no encoders.
+/// WebP 100 is lossless). NULL when it can't be.
 cskia_data_t* cskia_image_encode(const cskia_image_t* image, int32_t format, int32_t quality);
 void cskia_image_ref(cskia_image_t* image);
 void cskia_image_unref(cskia_image_t* image);
@@ -525,8 +522,7 @@ bool cskia_codec_get_pixels(cskia_codec_t* codec, void* pixels, size_t row_bytes
 
 /// SkSVGDOM::Builder().make over a copy of the document's `size` bytes,
 /// <text> laid out with the platform's fonts. One new reference; NULL when
-/// it doesn't parse, and always on a build without Skia's SVG module (the
-/// browser's).
+/// it doesn't parse.
 cskia_svg_dom_t* cskia_svg_dom_make_from_data(const void* data, size_t size);
 void cskia_svg_dom_unref(cskia_svg_dom_t* dom);
 /// getRoot()->intrinsicSize: the root <svg>'s width and height in pixels,

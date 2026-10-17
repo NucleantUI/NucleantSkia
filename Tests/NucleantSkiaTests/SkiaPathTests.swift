@@ -193,13 +193,6 @@ private func square(_ x: Float, _ y: Float, _ side: Float) -> SkPath {
     return path
 }
 
-#if os(WASI)
-@Test func pathOpsAreUnavailableInTheBrowser() {
-    #expect(square(0, 0, 10).op(square(5, 5, 10), .union) == nil)
-    #expect(square(0, 0, 10).simplify() == nil)
-    #expect(SkOpBuilder().resolve() == nil)
-}
-#else
 @Test func pathOpsCombineAreas() throws {
     let a = square(0, 0, 10), b = square(5, 5, 10)
 
@@ -235,7 +228,6 @@ private func square(_ x: Float, _ y: Float, _ side: Float) -> SkPath {
     let built = try #require(builder.resolve())
     #expect(built.contains(x: 13, y: 13) && !built.contains(x: 5, y: 5))
 }
-#endif
 
 private func isNear(_ a: SIMD2<Float>, _ b: SIMD2<Float>) -> Bool {
     abs(a.x - b.x) < 0.001 && abs(a.y - b.y) < 0.001

@@ -148,7 +148,7 @@ public enum SkSrcRectConstraint: Int32, Sendable {
     case strict, fast
 }
 
-/// What `encode` writes. The browser's Skia has no encoders.
+/// What `encode` writes.
 public enum SkEncodedImageFormat: Int32, Sendable {
     case png, jpeg, webp
 }

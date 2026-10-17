@@ -29,15 +29,18 @@ into a texture the engine imports as the node's VkImage, the way ThorVG does
 
 Single-threaded, as everything else in the module: the SDK's libc++ has no
 threads, so — as in build_thorvg_wasm.py — a force-included header supplies
-the `std::mutex` (and a `std::thread` that traps if started) Skia names, and
+the `std::mutex` (and a `std::thread` that traps if started) Skia names, the
+`std::condition_variable` ICU names, and
 `thread_local` is compiled as `static`.
 
 Fonts: FreeType with the custom empty font manager — faces are made from
 files or data (NucleantUI loads its bundled Roboto through it).
 
-Codecs: PNG, through the libpng FreeType already brings in — NucleantUI's
-`RasterImage` decodes its files with SkCodec off Apple. No other codecs,
-HarfBuzz or ICU yet: NucleantSkia does not use them.
+Everything else is what the other platforms' Skia has (build_skia.py): the
+codecs and encoders (PNG, JPEG, WebP, GIF — not RAW, whose DNG SDK needs C++
+exceptions the SDK's libc++abi lacks), PDF and PathOps, and the
+modules — SVG, skshaper with HarfBuzz, skunicode with ICU (Skia's trimmed
+ICU data for wasm, compiled in), skparagraph, skottie.
 
     python3 scripts/build_skia_wasm.py [--clean] [--jobs N]
 """
@@ -69,10 +72,17 @@ SKIA_REVISION = "2708a1b1540e59b8e3407405b0c991a5c7b69523"
 DAWN_RELEASE = "v20260219.200501"
 DAWN_HEADERS_URL = ("https://github.com/google/dawn/releases/download/"
                     f"{DAWN_RELEASE}/dawn-headers-536c572abab2602db0b652eda401ebd01e046c11.tar.gz")
-# The third-party checkouts the build below needs, out of Skia's DEPS.
-# FreeType links libpng unconditionally in Skia's build (color bitmap
-# glyphs), the PNG codec decodes through it, and libpng needs zlib.
-DEPS_NEEDED = ["freetype", "libpng", "zlib"]
+# The third-party checkouts the build below needs, out of Skia's DEPS: the
+# same libraries the other platforms' Skia is built with.
+DEPS_NEEDED = ["freetype", "libpng", "zlib", "expat", "harfbuzz", "icu", "libjpeg-turbo",
+               "libwebp", "wuffs", "piex"]
+
+LIBRARY_TARGETS = [
+    "skia", "modules/svg:svg", "modules/skshaper:skshaper", "modules/skunicode:skunicode_core",
+    "modules/skunicode:skunicode_icu", "modules/skparagraph:skparagraph", "modules/skottie:skottie",
+    "modules/sksg:sksg", "modules/skresources:skresources", "modules/jsonreader:jsonreader",
+    "modules/bentleyottmann:bentleyottmann", "modules/skcms:skcms",
+]
 
 TRIPLE = "wasm32-wasip1"
 VERSION_RE = re.compile(r"(\d+\.\d+(?:\.\d+)?)")
@@ -104,6 +114,20 @@ public:
     void detach() {}
     static unsigned hardware_concurrency() noexcept { return 1; }
 };
+// ICU's. With one thread nothing can notify a waiter, so a wait that would
+// block traps; one whose condition already holds returns.
+template <class _Mutex> class unique_lock;
+class condition_variable {
+public:
+    constexpr condition_variable() noexcept = default;
+    condition_variable(const condition_variable&) = delete;
+    condition_variable& operator=(const condition_variable&) = delete;
+    void notify_one() noexcept {}
+    void notify_all() noexcept {}
+    void wait(unique_lock<mutex>&) { __builtin_trap(); }
+    template <class Predicate>
+    void wait(unique_lock<mutex>&, Predicate pred) { if (!pred()) { __builtin_trap(); } }
+};
 _LIBCPP_END_NAMESPACE_STD
 #endif
 #endif
@@ -133,6 +157,8 @@ target_cpu="wasm"
 is_official_build=true
 is_debug=false
 skia_emsdk_dir="{emsdk}"
+# The browser's GPU: Graphite on WebGPU, where the other platforms have
+# Ganesh on Vulkan.
 skia_enable_ganesh=false
 skia_enable_graphite=true
 skia_use_dawn=true
@@ -141,35 +167,38 @@ skia_use_webgl=false
 skia_use_gl=false
 skia_use_vulkan=false
 skia_use_metal=false
-skia_enable_pdf=false
-skia_enable_svg=false
-skia_enable_skottie=false
-skia_enable_tools=false
+skia_canvaskit_enable_webgpu=false
+# Fonts: FreeType with the custom empty manager — a browser has no system
+# fonts to find; faces come from files and data.
 skia_use_freetype=true
-skia_use_system_freetype2=false
-skia_use_freetype_woff2=false
-skia_use_freetype_zlib=false
-skia_use_freetype_svg=false
+skia_use_fontconfig=false
 skia_enable_fontmgr_custom_empty=true
 skia_enable_fontmgr_custom_directory=false
 skia_enable_fontmgr_custom_embedded=false
-skia_use_fontconfig=false
-skia_use_harfbuzz=false
-skia_use_icu=false
-skia_use_expat=false
-skia_use_zlib=true
-skia_use_system_zlib=false
-skia_use_wuffs=false
-skia_use_libpng_decode=true
-skia_use_libpng_encode=false
-skia_use_libjpeg_turbo_decode=false
-skia_use_libjpeg_turbo_encode=false
-skia_use_libwebp_decode=false
-skia_use_libwebp_encode=false
+# Everything else as build_skia.py builds it for the other platforms: Skia's
+# defaults, with what Skia leaves out of a wasm build by default switched
+# back on (PDF, which brings PathOps; expat, for SVG; WebP encoding).
+skia_enable_pdf=true
+skia_enable_svg=true
+skia_enable_skottie=true
+skia_enable_tools=false
+skia_use_expat=true
+skia_use_libwebp_encode=true
+skia_use_piex=true
+# The one exception: Adobe's DNG SDK (RAW decoding) is built with C++
+# exceptions, and the Swift SDK's libc++abi has no exception runtime.
 skia_use_dng_sdk=false
-skia_use_piex=false
+skia_use_freetype_woff2=false
 skia_use_lua=false
-skia_canvaskit_enable_webgpu=false
+# Third-party libraries from Skia's own checkouts, as build_skia.py.
+skia_use_system_expat=false
+skia_use_system_freetype2=false
+skia_use_system_harfbuzz=false
+skia_use_system_icu=false
+skia_use_system_libjpeg_turbo=false
+skia_use_system_libpng=false
+skia_use_system_libwebp=false
+skia_use_system_zlib=false
 extra_cflags={extra_cflags}
 extra_cflags_cc=["-frtti"]
 """
@@ -314,6 +343,16 @@ def patch_skia(dawn_include: Path) -> None:
                "        }\n"
                "    };\n"
                "#else\n    // It's important we test for Mach before this.")
+    # ICU's own symbol names (ubrk_open_74, …): Swift's Foundation for wasm
+    # links an ICU of its own into the same module, with the plain names,
+    # so Skia's keeps ICU's default renaming — in ICU and in skunicode,
+    # which calls it.
+    patch_once("third_party/icu/BUILD.gn",
+               '      "U_DISABLE_RENAMING=1",\n',
+               '      "U_DISABLE_RENAMING=0",  # wasm (build_skia_wasm.py): beside Foundation\'s ICU\n')
+    patch_once("modules/skunicode/BUILD.gn",
+               '        defines += [ "U_DISABLE_RENAMING=1" ]\n',
+               '        defines += [ "U_DISABLE_RENAMING=0" ]  # wasm (build_skia_wasm.py): beside Foundation\'s ICU\n')
     # Two Dawn-native features whose names moved between Dawn's last header
     # release and Skia's Dawn pin. Neither exists in the browser, so the
     # code paths that use them go the way Emscripten's do.
@@ -403,11 +442,22 @@ def main() -> int:
     # too (see patch_skia for the raster pipeline's).
     # _WASI_EMULATED_MMAN: SkOSFile maps files; the Swift SDK links WASI's
     # mmap emulation (libwasi-emulated-mman) into every module already.
+    # U_HAVE_TZSET/TIMEZONE/TZNAME=0: WASI's libc has none of POSIX's
+    # timezone globals; ICU then works the zone out with localtime_r.
+    # _WASI_EMULATED_SIGNAL: ICU's decimal numbers include <signal.h>, but
+    # never raise one (that code is #if 0) — the declarations are enough.
+    # UCaseMap / uprv_getDefaultCodepage: the two names ICU's renaming leaves
+    # alone (see patch_skia), which Foundation's ICU defines too.
     extra_cflags = ["-DSK_BUILD_FOR_UNIX", "-DSKCMS_HAS_MUSTTAIL=0", "-D_WASI_EMULATED_MMAN", "-Dthread_local=",
+                    "-DU_HAVE_TZSET=0", "-DU_HAVE_TIMEZONE=0", "-DU_HAVE_TZNAME=0", "-D_WASI_EMULATED_SIGNAL",
+                    "-DUCaseMap=SkICU_UCaseMap", "-Duprv_getDefaultCodepage=skicu_uprv_getDefaultCodepage",
                     "-Wno-keyword-macro", "-Wno-unknown-warning-option"]
     gn_args = GN_ARGS.format(emsdk=emsdk.as_posix(), extra_cflags="[" + ",".join(f'"{f}"' for f in extra_cflags) + "]")
     run([str(SKIA_DIR / "bin" / "gn"), "gen", str(OUT_DIR), f"--args={gn_args}"], cwd=SKIA_DIR)
-    ninja = ["ninja", "-C", str(OUT_DIR), "skia"]
+    # Skia and its modules, as build_skia.py builds them (their third-party
+    # libraries come as dependencies). Named, not ninja's default, which in
+    # a wasm build also has CanvasKit's Emscripten bindings.
+    ninja = ["ninja", "-C", str(OUT_DIR), *LIBRARY_TARGETS]
     if args.jobs:
         ninja += ["-j", str(args.jobs)]
     run(ninja, cwd=SKIA_DIR)

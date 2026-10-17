@@ -34,14 +34,11 @@
 #include "include/effects/SkCornerPathEffect.h"
 #include "include/effects/SkDashPathEffect.h"
 #include "include/effects/SkGradientShader.h"
-#include "include/utils/SkParsePath.h"
-#if !defined(__wasm__)
-// PathOps and the encoders: in every Skia build here but the browser's.
 #include "include/encode/SkJpegEncoder.h"
 #include "include/encode/SkPngEncoder.h"
 #include "include/encode/SkWebpEncoder.h"
 #include "include/pathops/SkPathOps.h"
-#endif
+#include "include/utils/SkParsePath.h"
 #if defined(__APPLE__)
 #include "include/ports/SkFontMgr_mac_ct.h"
 #elif defined(__ANDROID__)
@@ -585,8 +582,6 @@ int32_t cskia_path_iter_next(cskia_path_iter_t* iter, float* xy, float* conic_we
 
 // MARK: - PathOps
 
-#if !defined(__wasm__)
-
 static SkPathOp path_op(int32_t v) { return clamp_enum<SkPathOp>(v, static_cast<int32_t>(kReverseDifference_SkPathOp)); }
 
 bool cskia_path_op(const cskia_path_t* one, const cskia_path_t* two, int32_t op, cskia_path_t* out) {
@@ -616,19 +611,6 @@ void cskia_op_builder_add(cskia_op_builder_t* builder, const cskia_path_t* path,
 bool cskia_op_builder_resolve(cskia_op_builder_t* builder, cskia_path_t* out) {
     return reinterpret_cast<SkOpBuilder*>(builder)->resolve(as_path(out));
 }
-
-#else
-
-// The browser's Skia is built without PathOps.
-bool cskia_path_op(const cskia_path_t*, const cskia_path_t*, int32_t, cskia_path_t*) { return false; }
-bool cskia_path_simplify(const cskia_path_t*, cskia_path_t*) { return false; }
-bool cskia_path_as_winding(const cskia_path_t*, cskia_path_t*) { return false; }
-cskia_op_builder_t* cskia_op_builder_new(void) { return reinterpret_cast<cskia_op_builder_t*>(new int(0)); }
-void cskia_op_builder_delete(cskia_op_builder_t* builder) { delete reinterpret_cast<int*>(builder); }
-void cskia_op_builder_add(cskia_op_builder_t*, const cskia_path_t*, int32_t) {}
-bool cskia_op_builder_resolve(cskia_op_builder_t*, cskia_path_t*) { return false; }
-
-#endif
 
 // MARK: - SkPathMeasure
 
@@ -1040,7 +1022,6 @@ cskia_image_t* cskia_image_make_raster_image(const cskia_image_t* image) {
     return release_to<SkImage, cskia_image_t>(as_image(image)->makeRasterImage());
 }
 
-#if !defined(__wasm__)
 cskia_data_t* cskia_image_encode(const cskia_image_t* image, int32_t format, int32_t quality) {
     // The encoders read a pixmap: a lazy image is decoded for them first.
     sk_sp<SkImage> raster = as_image(image)->makeRasterImage();
@@ -1067,10 +1048,6 @@ cskia_data_t* cskia_image_encode(const cskia_image_t* image, int32_t format, int
     }
     return release_to<SkData, cskia_data_t>(std::move(data));
 }
-#else
-// The browser's Skia has no encoders.
-cskia_data_t* cskia_image_encode(const cskia_image_t*, int32_t, int32_t) { return nullptr; }
-#endif
 
 void cskia_image_ref(cskia_image_t* image) { SkSafeRef(as_image(image)); }
 void cskia_image_unref(cskia_image_t* image) { SkSafeUnref(as_image(image)); }
