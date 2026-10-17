@@ -1,12 +1,12 @@
-# Builds Skia for every platform from source, packages each as the archive a
-# `.binaryTarget` takes, and builds and tests NucleantSkia against it:
+# Builds Skia for every platform from source, packages it as the archives a
+# `.binaryTarget` takes, and builds and tests NucleantSkia against them — one
+# machine per platform, which builds, packages and tests:
 #
-#   Skia.xcframework.zip                         macOS + iOS + iOS simulator
-#   skia-linux-x86_64.artifactbundle.zip         \
-#   skia-linux-aarch64.artifactbundle.zip         |  static-library artifact
-#   skia-android-arm64-v8a.artifactbundle.zip     |  bundles (SE-0482),
-#   skia-android-x86_64.artifactbundle.zip        |  one per platform/arch
-#   skia-wasm32.artifactbundle.zip               /
+#   apple    Skia.xcframework.zip                        macOS + iOS + simulator
+#   linux    skia-linux-x86_64.artifactbundle.zip        \  static-library
+#   android  skia-android-arm64-v8a.artifactbundle.zip    | artifact bundles
+#            skia-android-x86_64.artifactbundle.zip       | (SE-0482), one per
+#   wasm     skia-wasm32.artifactbundle.zip              /  platform/arch
 #
 # The archives are this run's artifacts ("skia-*"). Run it by hand to check
 # that the dependencies still build; release.yml runs it for each tag and
@@ -35,12 +35,9 @@ env:
   NUCLEANT_SKIA_ARTIFACTS: "1"
 
 jobs:
-  apple-build:
-    name: apple (${{ matrix.config }})
-    strategy:
-      fail-fast: false
-      matrix:
-        config: [macos-arm64, macos-x64, ios-arm64, ios-sim-arm64, ios-sim-x64]
+  apple:
+    # One arm64 Mac builds every configuration: macOS arm64 + x86_64, iOS,
+    # and the simulator's arm64 + x86_64.
     runs-on: macos-15
     timeout-minutes: 360
     steps:
@@ -50,31 +47,10 @@ jobs:
         with:
           python-version: "3.13"
       - run: brew install ninja
-      - run: python scripts/build_skia_apple.py build --config ${{ matrix.config }} --out apple/${{ matrix.config }}
-      - uses: actions/upload-artifact@v7
-        with:
-          name: apple-${{ matrix.config }}
-          path: apple/${{ matrix.config }}
-          retention-days: 3
-
-  apple:
-    needs: apple-build
-    runs-on: macos-15
-    timeout-minutes: 60
-    steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-python@v7
-        with:
-          python-version: "3.13"
-      - uses: actions/download-artifact@v8
-        with:
-          pattern: apple-*
-          path: apple
-      - name: Package Skia.xcframework.zip
-        run: |
-          # The package step names slices by configuration: apple-macos-arm64 -> macos-arm64.
-          for d in apple/apple-*; do mv "$d" "apple/${d#apple/apple-}"; done
-          python scripts/build_skia_apple.py package --inputs apple/* --output dist
+      - name: Build Skia
+        run: python scripts/build_skia_apple.py build --out apple
+      - name: Package
+        run: python scripts/build_skia_apple.py package --inputs apple/* --output dist
       - uses: actions/upload-artifact@v7
         with:
           name: skia-apple
@@ -91,23 +67,26 @@ jobs:
           swift test
 
   linux:
-    name: linux (${{ matrix.arch }})
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          # Ubuntu 24.04's GCC, as Dependencies/linux is built.
-          - { arch: x86_64, runner: ubuntu-24.04 }
-          - { arch: aarch64, runner: ubuntu-24.04-arm }
-    runs-on: ${{ matrix.runner }}
+    # x86_64, as Dependencies/linux, and the one Linux architecture
+    # NucleantVulkan vendors wgpu-native for. In Swift's own image, which has
+    # the toolchain; Ubuntu 24.04's GCC builds Skia, as Dependencies/linux is.
+    runs-on: ubuntu-24.04
+    container: swift:6.3.3-noble
     timeout-minutes: 360
     steps:
       - uses: actions/checkout@v7
+      # Skia's build, and Skia's (fontconfig, zlib) and NucleantVulkan's
+      # system libraries for the tests.
       - name: System packages
-        run: sudo apt-get update && sudo apt-get install -y libfontconfig1-dev ninja-build
+        run: >
+          apt-get update && apt-get install -y
+          g++ python3 ninja-build patch curl
+          libfontconfig1-dev zlib1g-dev
+          libvulkan-dev libwayland-dev libxcb1-dev libx11-dev libshaderc-dev libspirv-cross-c-shared-dev
       - name: skia-python
         run: |
           # build_skia.py builds out of skia-python, next to this checkout.
+          git config --global --add safe.directory '*'
           git clone --depth 1 https://github.com/NucleantUI/skia-python.git ../skia-python
           git -C ../skia-python submodule update --init --depth 1 depot_tools skia
           # As skia-python's own Linux build: the system's ninja and Skia's
@@ -124,118 +103,75 @@ jobs:
         run: >
           python3 scripts/make_artifactbundle.py
           --lib-dir Dependencies/linux/lib --include Dependencies/linux/include
-          --triple ${{ matrix.arch }}-unknown-linux-gnu
-          --name skia-linux-${{ matrix.arch }} --output dist --version "$VERSION" --ar ar
+          --triple x86_64-unknown-linux-gnu
+          --name skia-linux-x86_64 --output dist --version "$VERSION" --ar ar
       - uses: actions/upload-artifact@v7
         with:
-          name: skia-linux-${{ matrix.arch }}
-          path: dist/skia-linux-${{ matrix.arch }}.artifactbundle.zip
-
-  # x86_64 only: NucleantVulkan vendors wgpu-native for Linux x86_64 alone,
-  # so nothing links on aarch64 yet; its bundle is built above all the same.
-  linux-test:
-    name: linux test (x86_64)
-    needs: linux
-    runs-on: ubuntu-24.04
-    container: swift:6.3.3-noble
-    timeout-minutes: 60
-    steps:
-      - uses: actions/checkout@v7
-      # Skia's (fontconfig, zlib) and NucleantVulkan's system libraries.
-      - run: >
-          apt-get update && apt-get install -y
-          libfontconfig1-dev zlib1g-dev
-          libvulkan-dev libwayland-dev libxcb1-dev libx11-dev libshaderc-dev libspirv-cross-c-shared-dev
-      - uses: actions/download-artifact@v8
-        with:
-          name: skia-linux-x86_64
-          path: Artifacts
-      - run: swift test
+          name: skia-linux
+          path: dist/skia-linux-x86_64.artifactbundle.zip
+      - name: Test against it
+        run: |
+          mkdir -p Artifacts && cp dist/skia-linux-x86_64.artifactbundle.zip Artifacts/
+          swift test
 
   android:
-    name: android (${{ matrix.abi }})
-    strategy:
-      fail-fast: false
-      matrix:
-        abi: [arm64-v8a, x86_64]
+    # Both ABIs on one machine, in Swift's image for the cross-compile after.
     runs-on: ubuntu-24.04
+    container: swift:6.3.3-noble
     timeout-minutes: 360
     steps:
       - uses: actions/checkout@v7
-      - run: sudo apt-get update && sudo apt-get install -y ninja-build
+      - run: apt-get update && apt-get install -y python3 ninja-build patch curl unzip
       # NDK r28, the line Dependencies/android is built with.
       - uses: nttld/setup-ndk@v1
         id: ndk
         with:
           ndk-version: r28c
           add-to-path: false
+      - run: echo "ANDROID_NDK_HOME=${{ steps.ndk.outputs.ndk-path }}" >> "$GITHUB_ENV"
       - name: skia-python
         run: |
+          git config --global --add safe.directory '*'
           git clone --depth 1 https://github.com/NucleantUI/skia-python.git ../skia-python
           git -C ../skia-python submodule update --init --depth 1 depot_tools skia
           mv ../skia-python/depot_tools/ninja ../skia-python/depot_tools/ninja.bak
           mv ../skia-python/depot_tools/gn ../skia-python/depot_tools/gn.bak
           echo "$(cd ../skia-python/skia && pwd)/bin" >> "$GITHUB_PATH"
       - name: Build Skia
-        env:
-          ANDROID_NDK_HOME: ${{ steps.ndk.outputs.ndk-path }}
         run: |
           rm -rf Dependencies/android
-          python3 scripts/build_skia.py --android --abis ${{ matrix.abi }}
+          python3 scripts/build_skia.py --android --abis arm64-v8a,x86_64
       - name: Package
-        env:
-          NDK: ${{ steps.ndk.outputs.ndk-path }}
         run: |
-          case "${{ matrix.abi }}" in arm64-v8a) arch=aarch64 ;; x86_64) arch=x86_64 ;; esac
-          python3 scripts/make_artifactbundle.py \
-            --lib-dir Dependencies/android/${{ matrix.abi }}/lib --include Dependencies/android/include \
-            --triple "$arch-unknown-linux-android28" \
-            --name skia-android-${{ matrix.abi }} --output dist --version "$VERSION" \
-            --ar "$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-ar"
+          for abi in arm64-v8a x86_64; do
+            case "$abi" in arm64-v8a) arch=aarch64 ;; x86_64) arch=x86_64 ;; esac
+            python3 scripts/make_artifactbundle.py \
+              --lib-dir "Dependencies/android/$abi/lib" --include Dependencies/android/include \
+              --triple "$arch-unknown-linux-android28" \
+              --name "skia-android-$abi" --output dist --version "$VERSION" \
+              --ar "$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-ar"
+          done
       - uses: actions/upload-artifact@v7
         with:
-          name: skia-android-${{ matrix.abi }}
-          path: dist/skia-android-${{ matrix.abi }}.artifactbundle.zip
-
-  android-test:
-    name: android test (${{ matrix.abi }})
-    needs: android
-    strategy:
-      fail-fast: false
-      matrix:
-        abi: [arm64-v8a, x86_64]
-    runs-on: ubuntu-24.04
-    container: swift:6.3.3-noble
-    timeout-minutes: 60
-    steps:
-      - uses: actions/checkout@v7
-      - run: apt-get update && apt-get install -y unzip curl
-      - uses: nttld/setup-ndk@v1
-        id: ndk
-        with:
-          ndk-version: r28c
-          add-to-path: false
+          name: skia-android
+          path: dist/skia-android-*.artifactbundle.zip
       - name: Swift's Android SDK
-        env:
-          ANDROID_NDK_HOME: ${{ steps.ndk.outputs.ndk-path }}
         run: |
           release="swift-${SWIFT_VERSION}-RELEASE"
           swift sdk install \
             "https://download.swift.org/swift-${SWIFT_VERSION}-release/android-sdk/${release}/${release}_android.artifactbundle.tar.gz" \
             --checksum d160cc3206dd1886dae3fef2337af5e25ec034692cd0ec225721c56cc69da7f5
           "$HOME/.swiftpm/swift-sdks/${release}_android.artifactbundle/swift-android/scripts/setup-android-sdk.sh"
-      - uses: actions/download-artifact@v8
-        with:
-          name: skia-android-${{ matrix.abi }}
-          path: Artifacts
       # Cross-compiled: builds and links the tests, which no device runs here.
       - name: Build against it
         env:
           ANDROID_BUILD: "1"
-          SWIFT_ANDROID_ABI: ${{ matrix.abi }}
         run: |
-          case "${{ matrix.abi }}" in arm64-v8a) arch=aarch64 ;; x86_64) arch=x86_64 ;; esac
-          swift build --swift-sdk "$arch-unknown-linux-android28" --build-tests
+          mkdir -p Artifacts && cp dist/skia-android-*.artifactbundle.zip Artifacts/
+          for abi in arm64-v8a x86_64; do
+            case "$abi" in arm64-v8a) arch=aarch64 ;; x86_64) arch=x86_64 ;; esac
+            SWIFT_ANDROID_ABI="$abi" swift build --swift-sdk "$arch-unknown-linux-android28" --build-tests
+          done
 
   wasm:
     # build_skia_wasm.py runs Skia's build with the clang of the swift.org

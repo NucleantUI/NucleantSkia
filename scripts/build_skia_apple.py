@@ -4,17 +4,15 @@ package it as one Skia.xcframework.zip — the Apple counterpart of
 build_skia.py + make_artifactbundle.py.
 
 From nucleant_dev/skia-build's build_skia_macos.py and build_skia_ios.py:
-the same Skia branch, GN arguments and build steps, split so each
-configuration builds on its own (one CI job each) and a last step packages
-them:
+the same Skia branch, GN arguments and build steps, for every configuration
+— macos-arm64, macos-x64, ios-arm64, ios-sim-arm64, ios-sim-x64 — on one Mac,
+then packaged:
 
-    python3 scripts/build_skia_apple.py build --config macos-arm64 --out out/macos-arm64
-    ... once per configuration: macos-arm64, macos-x64, ios-arm64,
-        ios-sim-arm64, ios-sim-x64
+    python3 scripts/build_skia_apple.py build --out out [--config ...]
     python3 scripts/build_skia_apple.py package --inputs out/* --output dist
 
-`build` leaves <out>/lib/*.a (libskia.a and the module archives) and
-<out>/include (Skia's headers). `package` makes the xcframework's three
+`build` leaves <out>/<config>/lib/*.a (libskia.a and the module archives)
+and <out>/<config>/include (Skia's headers). `package` makes the xcframework's three
 slices — macOS (arm64 + x86_64), iOS, iOS simulator (arm64 + x86_64), each
 `lipo`'d across its configurations — merges every archive of a slice into one
 libSkia.a, since a binary target links one library, and writes
@@ -232,13 +230,18 @@ def _copy_module_headers(staging, mod, whole=False):
 
 
 def build(ns):
-    target_os, cpu, simulator = CONFIGS[ns.config]
+    """Each configuration in turn, out of one checkout, into <out>/<config>."""
     if not ns.skip_sync:
         clone_or_update(ns.branch)
         sync_deps()
     patch_skia_sources()
+    for config in ns.config:
+        build_config(ns, config)
 
-    out_rel = os.path.join("out", f"{ns.config}-vulkan")
+
+def build_config(ns, config):
+    target_os, cpu, simulator = CONFIGS[config]
+    out_rel = os.path.join("out", f"{config}-vulkan")
     run([os.path.join("bin", "gn"), "gen", out_rel,
          f"--args={gn_args(target_os, cpu, simulator, ns.min_macos, ns.min_ios)}"], cwd=SKIA_DIR)
     # A flush and a short pause after `gn gen` — racing ninja's first wave
@@ -253,7 +256,7 @@ def build(ns):
     run_retry([ninja, "-C", out_rel, f"-j{ns.jobs}", "zlib", "libpng", "libjpeg"], cwd=SKIA_DIR, attempts=5)
     run_retry([ninja, "-C", out_rel, f"-j{ns.jobs}", *_lib_targets(ninja, out_rel)], cwd=SKIA_DIR, attempts=5)
 
-    out = os.path.abspath(ns.out)
+    out = os.path.join(os.path.abspath(ns.out), config)
     shutil.rmtree(out, ignore_errors=True)
     os.makedirs(os.path.join(out, "lib"))
     for name in ["libskia.a"] + MODULE_LIBS:
@@ -269,7 +272,7 @@ def build(ns):
     _copy_module_headers(staging, "skcms", whole=True)
     for mod in ("svg", "skparagraph", "skshaper", "skunicode", "skresources"):
         _copy_module_headers(staging, mod)
-    print(f"built {ns.config} -> {out}", flush=True)
+    print(f"built {config} -> {out}", flush=True)
 
 
 def _slice_of(config_dir):
@@ -320,9 +323,10 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     commands = parser.add_subparsers(dest="command", required=True)
 
-    b = commands.add_parser("build", help="build one configuration")
-    b.add_argument("--config", required=True, choices=list(CONFIGS))
-    b.add_argument("--out", required=True, help="directory for lib/ and include/")
+    b = commands.add_parser("build", help="build configurations")
+    b.add_argument("--config", nargs="+", default=list(CONFIGS), choices=list(CONFIGS),
+                   help="configurations to build (default: all)")
+    b.add_argument("--out", required=True, help="directory for <config>/lib and <config>/include")
     b.add_argument("--branch", default="chrome/m144")
     b.add_argument("--min-macos", default="14.0")
     b.add_argument("--min-ios", default="17.0")
@@ -333,7 +337,7 @@ def main():
     b.add_argument("--workdir", default=None, help="where the skia/ checkout and its out/ live")
 
     p = commands.add_parser("package", help="package built configurations as Skia.xcframework.zip")
-    p.add_argument("--inputs", nargs="+", required=True, help="the `build --out` directories, named by configuration")
+    p.add_argument("--inputs", nargs="+", required=True, help="the configurations' directories under `build --out`")
     p.add_argument("--output", required=True, help="directory Skia.xcframework.zip is written to")
 
     ns = parser.parse_args()
