@@ -52,12 +52,13 @@ How it's laid out (same shape as NucleantThorVG):
 - [x] drawPath
 - [x] drawImage (optional paint, linear sampling)
 - [x] drawImageRect (whole image into rect)
-- [ ] drawImageRect with source rect / sampling options
-- [ ] drawImageNine / drawImageLattice
+- [x] drawImageRect with source rect / sampling options
+- [x] drawImageNine
+- [ ] drawImageLattice
 - [ ] drawAtlas
 - [ ] drawVertices / drawPatch
 - [x] drawSimpleText / drawString (UTF-8)
-- [ ] drawTextBlob / drawGlyphs
+- [x] drawTextBlob / drawGlyphs
 - [ ] drawPicture / drawDrawable
 - [ ] drawRegion
 - [ ] drawAnnotation
@@ -93,35 +94,36 @@ How it's laid out (same shape as NucleantThorVG):
 ## SkPath
 - [x] new / copy / reset / rewind
 - [x] moveTo / lineTo / quadTo / conicTo / cubicTo / close
-- [ ] rMoveTo / rLineTo / rQuadTo / rConicTo / rCubicTo
-- [ ] arcTo (all three forms)
+- [x] rMoveTo / rLineTo / rQuadTo / rConicTo / rCubicTo
+- [x] arcTo (all three forms: tangent, oval, SVG) / rArcTo
 - [x] addRect (direction)
 - [x] addRRect (uniform radius)
-- [ ] addRRect with per-corner radii
+- [x] addRRect with per-corner radii (`cornerRadii:`)
 - [x] addOval
 - [x] addCircle
 - [x] addArc
-- [ ] addPoly
+- [x] addPoly
 - [x] addPath (offset)
-- [ ] addPath with matrix / AddPathMode / reverseAddPath
+- [x] addPath with matrix / AddPathMode / reverseAddPath
 - [x] setFillType / getFillType
-- [ ] toggleInverseFillType / isInverseFillType
+- [x] toggleInverseFillType / isInverseFillType
 - [x] getBounds / computeTightBounds
 - [x] contains
 - [x] isEmpty
 - [x] countPoints / countVerbs
-- [ ] getPoint / getPoints / getVerbs / getLastPt / setLastPt
-- [ ] Iter / RawIter
-- [ ] isRect / isOval / isRRect / isLine / isConvex / isFinite
-- [ ] conservativelyContainsRect
-- [ ] interpolate / isInterpolatable
+- [x] getPoint / getPoints / getLastPt / setLastPt (verbs: through `elements()`)
+- [x] Iter — `SkPathIter` (a Sequence of `SkPathElement`), `elements(forceClose:)`
+- [x] isRect / isOval / isLine / isConvex / isFinite / isLastContourClosed
+- [ ] isRRect
+- [x] conservativelyContainsRect
+- [x] interpolate / isInterpolatable
 - [x] offset
 - [x] transform (SkMatrix)
-- [ ] serialize / readFromMemory
-- [ ] SkParsePath — FromSVGString / ToSVGString
-- [ ] PathOps — Op (union / intersect / difference / xor), Simplify, AsWinding, SkOpBuilder
+- [x] serialize / readFromMemory (`serialize()`, `SkPath(serialized:)`)
+- [x] SkParsePath — FromSVGString / ToSVGString (`SkPath(svg:)`, `toSVGString(relative:)`)
+- [x] PathOps — Op (`op(_:_:)`), Simplify, AsWinding, SkOpBuilder — nil in the browser, whose Skia has no PathOps
 - [ ] SkPathBuilder
-- [ ] SkPathMeasure (length, getPosTan, getSegment)
+- [x] SkPathMeasure (length, getPosTan, getSegment, isClosed, nextContour)
 
 ## SkShader
 - [x] SkGradientShader::MakeLinear
@@ -132,7 +134,7 @@ How it's laid out (same shape as NucleantThorVG):
 - [x] SkShaders::Color
 - [ ] SkShaders::Empty / Blend
 - [ ] SkShaders::MakeFractalNoise / MakeTurbulence
-- [ ] SkImage::makeShader (image shader, tile modes)
+- [x] SkImage::makeShader (image shader, tile modes)
 - [ ] makeWithLocalMatrix / makeWithColorFilter
 - [ ] SkPictureShader
 - [ ] SkRuntimeEffect (SkSL) shaders
@@ -173,15 +175,15 @@ How it's laid out (same shape as NucleantThorVG):
 - [x] SkFontMgr::makeFromData
 - [x] SkFontMgr::makeFromFile
 - [x] SkFontMgr::matchFamilyStyle (nil = platform default)
-- [ ] SkFontMgr::matchFamilyStyleCharacter (fallback for a character)
-- [ ] SkFontMgr::countFamilies / getFamilyName / matchFamily (enumeration)
+- [x] SkFontMgr::matchFamilyStyleCharacter (fallback for a character)
+- [x] SkFontMgr::countFamilies / getFamilyName / matchFamily (enumeration), SkFontStyleSet
 - [x] SkTypeface::getFamilyName
 - [x] SkTypeface::countGlyphs
-- [ ] fontStyle / isBold / isItalic / isFixedPitch
-- [ ] unicharToGlyph / unicharsToGlyphs
-- [ ] getUnitsPerEm
+- [x] fontStyle / isBold / isItalic / isFixedPitch
+- [x] unicharToGlyph
+- [x] getUnitsPerEm
 - [ ] makeClone (variable-font axes) / getVariationDesignPosition
-- [ ] countTables / getTableData
+- [x] table tags / getTableData (`SkSetFourByteTag`)
 
 ## SkFont
 - [x] new (typeface, size) / copy
@@ -195,34 +197,35 @@ How it's laid out (same shape as NucleantThorVG):
 - [x] setBaselineSnap
 - [x] setEdging
 - [x] setHinting
-- [ ] setForceAutoHinting / setEmbeddedBitmaps
-- [ ] getters for the flags (isEmbolden, isSubpixel, getEdging, getHinting, …)
+- [x] setForceAutoHinting / setEmbeddedBitmaps
+- [x] getters for the flags (isEmbolden, isSubpixel, getEdging, getHinting, …)
 - [x] measureText (advance, ink bounds)
 - [x] textToGlyphs
 - [x] getWidths
-- [ ] getWidthsBounds / getBounds
-- [ ] getPos / getXPos
-- [ ] getPath / getPaths (glyph outlines)
-- [ ] unicharToGlyph
-- [ ] getIntercepts
+- [x] getWidthsBounds / getBounds
+- [x] getPos / getXPos
+- [x] getPath (glyph outline)
+- [ ] getPaths
+- [x] unicharToGlyph / unicharsToGlyphs
+- [ ] getIntercepts (on the font — the blob has them)
 - [x] getMetrics (SkFontMetrics)
 - [x] getSpacing
 
 ## Text layout
-- [ ] SkTextBlob / SkTextBlobBuilder
-- [ ] SkShaper (libskshaper is linked)
-- [ ] skparagraph — ParagraphBuilder / Paragraph (libskparagraph is linked)
+- [x] SkTextBlob (from text, positioned glyphs, x positions; bounds, getIntercepts) / SkTextBlobBuilder (three run kinds)
+- [ ] SkShaper (Apple has it as SkiaShaper.xcframework; the HarfBuzz shaper is only in the Linux build)
+- [ ] skparagraph — ParagraphBuilder / Paragraph (only in the Linux build)
 - [ ] SkUnicode (libskunicode is linked)
 
 ## SkImage (SkImages)
 - [x] SkImages::RasterFromPixmapCopy (RGBA/BGRA bytes, 32-bit pixels)
 - [x] width / height
 - [ ] RasterFromData / RasterFromPixmap (no copy, release proc)
-- [ ] DeferredFromEncodedData (PNG decode is linked)
-- [ ] colorType / alphaType / isOpaque
-- [ ] readPixels / peekPixels
-- [ ] makeSubset / makeRasterImage
-- [ ] SkPngEncoder / encode (PNG encode is linked)
+- [x] DeferredFromEncodedData (`SkImage(encoded:)`)
+- [x] colorType / alphaType / isOpaque
+- [x] readPixels (any rect) / peekPixels (`withPeekedPixels`)
+- [x] makeSubset / makeRasterImage
+- [x] encode — PNG, JPEG, WebP (`encode(_:quality:)`) — nil in the browser, whose Skia has no encoders
 - [ ] SkImages::TextureFromTexture — wrap a VkImage as an image (GPU)
 - [ ] makeTextureImage
 

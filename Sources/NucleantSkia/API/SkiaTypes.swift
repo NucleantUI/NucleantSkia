@@ -76,6 +76,83 @@ public enum SkAlphaType: Int32 {
     case opaque = 1, premul, unpremul
 }
 
+/// SkPathOp — how `SkPath.op` combines two paths.
+public enum SkPathOp: Int32, Sendable {
+    case difference, intersect, union, xor, reverseDifference
+}
+
+/// SkPath::AddPathMode — `append` starts a new contour, `extend` joins the
+/// added path to the last one.
+public enum SkPathAddPathMode: Int32, Sendable {
+    case append, extend
+}
+
+/// One verb of a path with its points, as `SkPathIter` hands them out. A
+/// segment's first point is where it starts (the previous end).
+public enum SkPathElement: Equatable, Sendable {
+    case move(SIMD2<Float>)
+    case line(SIMD2<Float>, SIMD2<Float>)
+    case quad(SIMD2<Float>, SIMD2<Float>, SIMD2<Float>)
+    case conic(SIMD2<Float>, SIMD2<Float>, SIMD2<Float>, weight: Float)
+    case cubic(SIMD2<Float>, SIMD2<Float>, SIMD2<Float>, SIMD2<Float>)
+    case close
+}
+
+/// SkFilterMode
+public enum SkFilterMode: Int32, Sendable {
+    case nearest, linear
+}
+
+/// SkMipmapMode
+public enum SkMipmapMode: Int32, Sendable {
+    case none, nearest, linear
+}
+
+/// SkSamplingOptions — a filter and mipmap mode, or a cubic resampler
+/// (SkCubicResampler's B and C).
+public struct SkSamplingOptions: Hashable, Sendable {
+    public var filter: SkFilterMode
+    public var mipmap: SkMipmapMode
+    /// (B, C) of SkCubicResampler; when set, `filter` and `mipmap` are unused.
+    public var cubic: SIMD2<Float>?
+
+    public init(filter: SkFilterMode = .nearest, mipmap: SkMipmapMode = .none) {
+        self.filter = filter
+        self.mipmap = mipmap
+        cubic = nil
+    }
+
+    /// SkCubicResampler{B, C}.
+    public init(cubicB: Float, cubicC: Float) {
+        filter = .nearest
+        mipmap = .none
+        cubic = SIMD2(cubicB, cubicC)
+    }
+
+    public static let nearest = SkSamplingOptions()
+    public static let linear = SkSamplingOptions(filter: .linear)
+    /// SkCubicResampler::Mitchell
+    public static let mitchell = SkSamplingOptions(cubicB: 1.0 / 3, cubicC: 1.0 / 3)
+    /// SkCubicResampler::CatmullRom
+    public static let catmullRom = SkSamplingOptions(cubicB: 0, cubicC: 0.5)
+
+    var c: cskia_sampling {
+        cskia_sampling(filter: filter.rawValue, mipmap: mipmap.rawValue, cubic: cubic != nil,
+                       cubic_b: cubic?.x ?? 0, cubic_c: cubic?.y ?? 0)
+    }
+}
+
+/// SkCanvas::SrcRectConstraint — `strict` samples only inside the source
+/// rect; `fast` may sample a little past it.
+public enum SkSrcRectConstraint: Int32, Sendable {
+    case strict, fast
+}
+
+/// What `encode` writes. The browser's Skia has no encoders.
+public enum SkEncodedImageFormat: Int32, Sendable {
+    case png, jpeg, webp
+}
+
 /// SkFontStyle
 public struct SkFontStyle: Hashable, Sendable {
     /// SkFontStyle::Slant

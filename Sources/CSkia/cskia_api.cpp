@@ -20,6 +20,7 @@
 #include "include/core/SkPaint.h"
 #include "include/core/SkPath.h"
 #include "include/core/SkPathEffect.h"
+#include "include/core/SkPathMeasure.h"
 #include "include/core/SkPixmap.h"
 #include "include/core/SkRRect.h"
 #include "include/core/SkRect.h"
@@ -27,10 +28,20 @@
 #include "include/core/SkShader.h"
 #include "include/core/SkString.h"
 #include "include/core/SkSurface.h"
+#include "include/core/SkStream.h"
+#include "include/core/SkTextBlob.h"
 #include "include/core/SkTypeface.h"
 #include "include/effects/SkCornerPathEffect.h"
 #include "include/effects/SkDashPathEffect.h"
 #include "include/effects/SkGradientShader.h"
+#include "include/utils/SkParsePath.h"
+#if !defined(__wasm__)
+// PathOps and the encoders: in every Skia build here but the browser's.
+#include "include/encode/SkJpegEncoder.h"
+#include "include/encode/SkPngEncoder.h"
+#include "include/encode/SkWebpEncoder.h"
+#include "include/pathops/SkPathOps.h"
+#endif
 #if defined(__APPLE__)
 #include "include/ports/SkFontMgr_mac_ct.h"
 #elif defined(__ANDROID__)
@@ -60,8 +71,9 @@
 
 // MARK: - Handle casts
 //
-// The C handles are the Skia objects themselves; only the raster surface
-// and the codec carry a wrapper (they have to hold the sk_sp / unique_ptr).
+// The C handles are the Skia objects themselves; only the raster surface,
+// the codec and the path iterator carry a wrapper (they have to hold the
+// sk_sp / unique_ptr / the iterator's own state).
 
 struct cskia_raster_surface_t {
     sk_sp<SkSurface> surface;
@@ -69,6 +81,10 @@ struct cskia_raster_surface_t {
 
 struct cskia_codec_t {
     std::unique_ptr<SkCodec> codec;
+};
+
+struct cskia_path_iter_t {
+    SkPath::Iter iter;
 };
 
 static SkCanvas*           as_canvas(cskia_canvas_t* c)              { return reinterpret_cast<SkCanvas*>(c); }
@@ -84,6 +100,13 @@ static SkShader*           as_shader(cskia_shader_t* s)              { return re
 static SkPathEffect*       as_effect(cskia_path_effect_t* e)         { return reinterpret_cast<SkPathEffect*>(e); }
 static const SkImage*      as_image(const cskia_image_t* i)          { return reinterpret_cast<const SkImage*>(i); }
 static SkImage*            as_image(cskia_image_t* i)                { return reinterpret_cast<SkImage*>(i); }
+static const SkTextBlob*   as_blob(const cskia_text_blob_t* b)       { return reinterpret_cast<const SkTextBlob*>(b); }
+static SkTextBlob*         as_blob(cskia_text_blob_t* b)             { return reinterpret_cast<SkTextBlob*>(b); }
+static SkTextBlobBuilder*  as_blob_builder(cskia_text_blob_builder_t* b) { return reinterpret_cast<SkTextBlobBuilder*>(b); }
+static SkPathMeasure*      as_measure(cskia_path_measure_t* m)       { return reinterpret_cast<SkPathMeasure*>(m); }
+static const SkData*       as_data(const cskia_data_t* d)            { return reinterpret_cast<const SkData*>(d); }
+static SkData*             as_data(cskia_data_t* d)                  { return reinterpret_cast<SkData*>(d); }
+static SkFontStyleSet*     as_style_set(cskia_font_style_set_t* s)   { return reinterpret_cast<SkFontStyleSet*>(s); }
 
 /// Hand one reference out across the C boundary.
 template <typename T, typename H>
@@ -122,6 +145,49 @@ static SkPathDirection direction(int32_t v)   { return clamp_enum<SkPathDirectio
 static SkTileMode     tile_mode(int32_t v)    { return clamp_enum<SkTileMode>(v, static_cast<int32_t>(SkTileMode::kLastTileMode)); }
 
 static SkSamplingOptions linear_sampling() { return SkSamplingOptions(SkFilterMode::kLinear); }
+
+static SkSamplingOptions sampling(const cskia_sampling* s) {
+    if (!s) { return linear_sampling(); }
+    if (s->cubic) { return SkSamplingOptions(SkCubicResampler{s->cubic_b, s->cubic_c}); }
+    return SkSamplingOptions(clamp_enum<SkFilterMode>(s->filter, 1), clamp_enum<SkMipmapMode>(s->mipmap, 2));
+}
+
+/// The C color types: 0 RGBA_8888, 1 BGRA_8888.
+static SkColorType color_type(int32_t v) { return v == 1 ? kBGRA_8888_SkColorType : kRGBA_8888_SkColorType; }
+
+static SkAlphaType alpha_type(int32_t v) {
+    SkAlphaType at = clamp_enum<SkAlphaType>(v, kLastEnum_SkAlphaType);
+    return at == kUnknown_SkAlphaType ? kPremul_SkAlphaType : at;
+}
+
+static SkFontStyle font_style(int32_t weight, int32_t width, int32_t slant) {
+    return SkFontStyle(weight, width, clamp_enum<SkFontStyle::Slant>(slant, 2));
+}
+
+static void write_style(const SkFontStyle& style, int32_t* weight, int32_t* width, int32_t* slant) {
+    if (weight) { *weight = style.weight(); }
+    if (width) { *width = style.width(); }
+    if (slant) { *slant = static_cast<int32_t>(style.slant()); }
+}
+
+/// `string` into `buffer` (NUL-terminated, truncated to `capacity`); its
+/// full length.
+static size_t copy_string(const SkString& string, char* buffer, size_t capacity) {
+    if (buffer && capacity > 0) {
+        size_t n = std::min(string.size(), capacity - 1);
+        std::memcpy(buffer, string.c_str(), n);
+        buffer[n] = '\0';
+    }
+    return string.size();
+}
+
+static SkSpan<const SkPoint> points(const float* xy, int32_t count) {
+    return {reinterpret_cast<const SkPoint*>(xy), static_cast<size_t>(std::max(count, 0))};
+}
+
+static SkSpan<const SkGlyphID> glyph_span(const uint16_t* glyphs, int32_t count) {
+    return {glyphs, static_cast<size_t>(std::max(count, 0))};
+}
 
 /// `count` × RGBA floats as SkColor4f.
 static std::vector<SkColor4f> colors4f(const float* rgba, int32_t count) {
@@ -247,6 +313,26 @@ void cskia_canvas_draw_image_rect(cskia_canvas_t* canvas, const cskia_image_t* i
     as_canvas(canvas)->drawImageRect(as_image(image), xywh(x, y, w, h), linear_sampling(), as_paint(paint));
 }
 
+void cskia_canvas_draw_image_rect_src(cskia_canvas_t* canvas, const cskia_image_t* image, const cskia_rect* src, const cskia_rect* dst, const cskia_sampling* s, const cskia_paint_t* paint, int32_t constraint) {
+    if (!image || !src || !dst) { return; }
+    as_canvas(canvas)->drawImageRect(as_image(image), xywh(src->x, src->y, src->w, src->h), xywh(dst->x, dst->y, dst->w, dst->h),
+                                     sampling(s), as_paint(paint),
+                                     constraint == 1 ? SkCanvas::kFast_SrcRectConstraint : SkCanvas::kStrict_SrcRectConstraint);
+}
+void cskia_canvas_draw_image_nine(cskia_canvas_t* canvas, const cskia_image_t* image, int32_t cx, int32_t cy, int32_t cw, int32_t ch, const cskia_rect* dst, int32_t filter, const cskia_paint_t* paint) {
+    if (!image || !dst) { return; }
+    as_canvas(canvas)->drawImageNine(as_image(image), SkIRect::MakeXYWH(cx, cy, cw, ch), xywh(dst->x, dst->y, dst->w, dst->h),
+                                     clamp_enum<SkFilterMode>(filter, 1), as_paint(paint));
+}
+void cskia_canvas_draw_text_blob(cskia_canvas_t* canvas, const cskia_text_blob_t* blob, float x, float y, const cskia_paint_t* paint) {
+    if (!blob) { return; }
+    as_canvas(canvas)->drawTextBlob(as_blob(blob), x, y, *as_paint(paint));
+}
+void cskia_canvas_draw_glyphs(cskia_canvas_t* canvas, const uint16_t* glyphs, const float* positions, int32_t count, float origin_x, float origin_y, const cskia_font_t* font, const cskia_paint_t* paint) {
+    if (!glyphs || !positions || count <= 0) { return; }
+    as_canvas(canvas)->drawGlyphs(glyph_span(glyphs, count), points(positions, count), {origin_x, origin_y}, *as_font(font), *as_paint(paint));
+}
+
 void cskia_canvas_draw_simple_text(cskia_canvas_t* canvas, const char* utf8, size_t byte_length, float x, float y, const cskia_font_t* font, const cskia_paint_t* paint) {
     if (!utf8 || byte_length == 0) { return; }
     as_canvas(canvas)->drawSimpleText(utf8, byte_length, SkTextEncoding::kUTF8, x, y, *as_font(font), *as_paint(paint));
@@ -351,6 +437,220 @@ int32_t cskia_path_count_verbs(const cskia_path_t* path) { return as_path(path)-
 void    cskia_path_offset(cskia_path_t* path, float dx, float dy) { as_path(path)->offset(dx, dy); }
 void    cskia_path_transform(cskia_path_t* path, const cskia_matrix* matrix) { as_path(path)->transform(to_matrix(matrix)); }
 
+void cskia_path_r_move_to(cskia_path_t* path, float dx, float dy) { as_path(path)->rMoveTo(dx, dy); }
+void cskia_path_r_line_to(cskia_path_t* path, float dx, float dy) { as_path(path)->rLineTo(dx, dy); }
+void cskia_path_r_quad_to(cskia_path_t* path, float dx1, float dy1, float dx2, float dy2) { as_path(path)->rQuadTo(dx1, dy1, dx2, dy2); }
+void cskia_path_r_conic_to(cskia_path_t* path, float dx1, float dy1, float dx2, float dy2, float weight) { as_path(path)->rConicTo(dx1, dy1, dx2, dy2, weight); }
+void cskia_path_r_cubic_to(cskia_path_t* path, float dx1, float dy1, float dx2, float dy2, float dx3, float dy3) {
+    as_path(path)->rCubicTo(dx1, dy1, dx2, dy2, dx3, dy3);
+}
+
+void cskia_path_arc_to_tangent(cskia_path_t* path, float x1, float y1, float x2, float y2, float radius) {
+    as_path(path)->arcTo(x1, y1, x2, y2, radius);
+}
+void cskia_path_arc_to_oval(cskia_path_t* path, float x, float y, float w, float h, float start_angle, float sweep_angle, bool force_move_to) {
+    as_path(path)->arcTo(xywh(x, y, w, h), start_angle, sweep_angle, force_move_to);
+}
+void cskia_path_arc_to_svg(cskia_path_t* path, float rx, float ry, float x_axis_rotate, bool large_arc, int32_t dir, float x, float y, bool relative) {
+    SkPath::ArcSize size = large_arc ? SkPath::kLarge_ArcSize : SkPath::kSmall_ArcSize;
+    if (relative) {
+        as_path(path)->rArcTo(rx, ry, x_axis_rotate, size, direction(dir), x, y);
+    } else {
+        as_path(path)->arcTo(rx, ry, x_axis_rotate, size, direction(dir), x, y);
+    }
+}
+
+void cskia_path_add_rrect_radii(cskia_path_t* path, float x, float y, float w, float h, const float* radii, int32_t dir) {
+    if (!radii) { return; }
+    SkRRect rrect;
+    rrect.setRectRadii(xywh(x, y, w, h), reinterpret_cast<const SkVector*>(radii));
+    as_path(path)->addRRect(rrect, direction(dir));
+}
+void cskia_path_add_poly(cskia_path_t* path, const float* xy, int32_t count, bool close) {
+    if (!xy || count <= 0) { return; }
+    as_path(path)->addPoly(points(xy, count), close);
+}
+void cskia_path_add_path_matrix(cskia_path_t* path, const cskia_path_t* src, const cskia_matrix* matrix, int32_t mode) {
+    SkPath::AddPathMode m = mode == 1 ? SkPath::kExtend_AddPathMode : SkPath::kAppend_AddPathMode;
+    as_path(path)->addPath(*as_path(src), matrix ? to_matrix(matrix) : SkMatrix::I(), m);
+}
+void cskia_path_reverse_add_path(cskia_path_t* path, const cskia_path_t* src) { as_path(path)->reverseAddPath(*as_path(src)); }
+
+void cskia_path_toggle_inverse_fill_type(cskia_path_t* path) { as_path(path)->toggleInverseFillType(); }
+bool cskia_path_is_inverse_fill_type(const cskia_path_t* path) { return as_path(path)->isInverseFillType(); }
+
+bool cskia_path_get_point(const cskia_path_t* path, int32_t index, float* x, float* y) {
+    if (index < 0 || index >= as_path(path)->countPoints()) { return false; }
+    SkPoint p = as_path(path)->getPoint(index);
+    if (x) { *x = p.fX; }
+    if (y) { *y = p.fY; }
+    return true;
+}
+int32_t cskia_path_get_points(const cskia_path_t* path, float* xy, int32_t max_points) {
+    if (xy && max_points > 0) {
+        as_path(path)->getPoints({reinterpret_cast<SkPoint*>(xy), static_cast<size_t>(max_points)});
+    }
+    return as_path(path)->countPoints();
+}
+bool cskia_path_get_last_pt(const cskia_path_t* path, float* x, float* y) {
+    std::optional<SkPoint> last = as_path(path)->getLastPt();
+    if (!last) { return false; }
+    if (x) { *x = last->fX; }
+    if (y) { *y = last->fY; }
+    return true;
+}
+void cskia_path_set_last_pt(cskia_path_t* path, float x, float y) { as_path(path)->setLastPt(x, y); }
+
+bool cskia_path_is_rect(const cskia_path_t* path, cskia_rect* out) {
+    SkRect rect;
+    if (!as_path(path)->isRect(&rect)) { return false; }
+    write_rect(rect, out);
+    return true;
+}
+bool cskia_path_is_oval(const cskia_path_t* path, cskia_rect* out) {
+    SkRect rect;
+    if (!as_path(path)->isOval(&rect)) { return false; }
+    write_rect(rect, out);
+    return true;
+}
+bool cskia_path_is_line(const cskia_path_t* path, float* line) {
+    SkPoint pts[2];
+    if (!as_path(path)->isLine(pts)) { return false; }
+    if (line) {
+        line[0] = pts[0].fX; line[1] = pts[0].fY;
+        line[2] = pts[1].fX; line[3] = pts[1].fY;
+    }
+    return true;
+}
+bool cskia_path_is_convex(const cskia_path_t* path) { return as_path(path)->isConvex(); }
+bool cskia_path_is_finite(const cskia_path_t* path) { return as_path(path)->isFinite(); }
+bool cskia_path_is_last_contour_closed(const cskia_path_t* path) { return as_path(path)->isLastContourClosed(); }
+bool cskia_path_conservatively_contains_rect(const cskia_path_t* path, float x, float y, float w, float h) {
+    return as_path(path)->conservativelyContainsRect(xywh(x, y, w, h));
+}
+
+bool cskia_path_is_interpolatable(const cskia_path_t* path, const cskia_path_t* other) {
+    return as_path(path)->isInterpolatable(*as_path(other));
+}
+bool cskia_path_interpolate(const cskia_path_t* path, const cskia_path_t* ending, float weight, cskia_path_t* out) {
+    return as_path(path)->interpolate(*as_path(ending), weight, as_path(out));
+}
+
+size_t cskia_path_write_to_memory(const cskia_path_t* path, void* buffer) { return as_path(path)->writeToMemory(buffer); }
+cskia_path_t* cskia_path_read_from_memory(const void* buffer, size_t length) {
+    if (!buffer || length == 0) { return nullptr; }
+    std::optional<SkPath> read = SkPath::ReadFromMemory(buffer, length);
+    return read ? reinterpret_cast<cskia_path_t*>(new SkPath(std::move(*read))) : nullptr;
+}
+
+cskia_path_t* cskia_path_make_from_svg_string(const char* svg) {
+    if (!svg) { return nullptr; }
+    std::optional<SkPath> parsed = SkParsePath::FromSVGString(svg);
+    return parsed ? reinterpret_cast<cskia_path_t*>(new SkPath(std::move(*parsed))) : nullptr;
+}
+size_t cskia_path_to_svg_string(const cskia_path_t* path, bool relative, char* buffer, size_t capacity) {
+    SkString svg = SkParsePath::ToSVGString(*as_path(path), relative ? SkParsePath::PathEncoding::Relative
+                                                                     : SkParsePath::PathEncoding::Absolute);
+    return copy_string(svg, buffer, capacity);
+}
+
+// MARK: - SkPath::Iter
+
+cskia_path_iter_t* cskia_path_iter_new(const cskia_path_t* path, bool force_close) {
+    return new cskia_path_iter_t{SkPath::Iter(*as_path(path), force_close)};
+}
+void cskia_path_iter_delete(cskia_path_iter_t* iter) { delete iter; }
+
+int32_t cskia_path_iter_next(cskia_path_iter_t* iter, float* xy, float* conic_weight) {
+    SkPoint pts[4];
+    SkPath::Verb verb = iter->iter.next(pts);
+    int count = 0;
+    switch (verb) {
+        case SkPath::kMove_Verb:  count = 1; break;
+        case SkPath::kLine_Verb:  count = 2; break;
+        case SkPath::kQuad_Verb:
+        case SkPath::kConic_Verb: count = 3; break;
+        case SkPath::kCubic_Verb: count = 4; break;
+        default: break;
+    }
+    if (xy) {
+        for (int i = 0; i < count; ++i) {
+            xy[i * 2] = pts[i].fX;
+            xy[i * 2 + 1] = pts[i].fY;
+        }
+    }
+    if (conic_weight) { *conic_weight = verb == SkPath::kConic_Verb ? iter->iter.conicWeight() : 1; }
+    return static_cast<int32_t>(verb);
+}
+
+// MARK: - PathOps
+
+#if !defined(__wasm__)
+
+static SkPathOp path_op(int32_t v) { return clamp_enum<SkPathOp>(v, static_cast<int32_t>(kReverseDifference_SkPathOp)); }
+
+bool cskia_path_op(const cskia_path_t* one, const cskia_path_t* two, int32_t op, cskia_path_t* out) {
+    std::optional<SkPath> result = Op(*as_path(one), *as_path(two), path_op(op));
+    if (!result) { return false; }
+    *as_path(out) = std::move(*result);
+    return true;
+}
+bool cskia_path_simplify(const cskia_path_t* path, cskia_path_t* out) {
+    std::optional<SkPath> result = Simplify(*as_path(path));
+    if (!result) { return false; }
+    *as_path(out) = std::move(*result);
+    return true;
+}
+bool cskia_path_as_winding(const cskia_path_t* path, cskia_path_t* out) {
+    std::optional<SkPath> result = AsWinding(*as_path(path));
+    if (!result) { return false; }
+    *as_path(out) = std::move(*result);
+    return true;
+}
+
+cskia_op_builder_t* cskia_op_builder_new(void) { return reinterpret_cast<cskia_op_builder_t*>(new SkOpBuilder()); }
+void cskia_op_builder_delete(cskia_op_builder_t* builder) { delete reinterpret_cast<SkOpBuilder*>(builder); }
+void cskia_op_builder_add(cskia_op_builder_t* builder, const cskia_path_t* path, int32_t op) {
+    reinterpret_cast<SkOpBuilder*>(builder)->add(*as_path(path), path_op(op));
+}
+bool cskia_op_builder_resolve(cskia_op_builder_t* builder, cskia_path_t* out) {
+    return reinterpret_cast<SkOpBuilder*>(builder)->resolve(as_path(out));
+}
+
+#else
+
+// The browser's Skia is built without PathOps.
+bool cskia_path_op(const cskia_path_t*, const cskia_path_t*, int32_t, cskia_path_t*) { return false; }
+bool cskia_path_simplify(const cskia_path_t*, cskia_path_t*) { return false; }
+bool cskia_path_as_winding(const cskia_path_t*, cskia_path_t*) { return false; }
+cskia_op_builder_t* cskia_op_builder_new(void) { return reinterpret_cast<cskia_op_builder_t*>(new int(0)); }
+void cskia_op_builder_delete(cskia_op_builder_t* builder) { delete reinterpret_cast<int*>(builder); }
+void cskia_op_builder_add(cskia_op_builder_t*, const cskia_path_t*, int32_t) {}
+bool cskia_op_builder_resolve(cskia_op_builder_t*, cskia_path_t*) { return false; }
+
+#endif
+
+// MARK: - SkPathMeasure
+
+cskia_path_measure_t* cskia_path_measure_new(const cskia_path_t* path, bool force_closed, float res_scale) {
+    return reinterpret_cast<cskia_path_measure_t*>(new SkPathMeasure(*as_path(path), force_closed, res_scale));
+}
+void  cskia_path_measure_delete(cskia_path_measure_t* measure) { delete as_measure(measure); }
+float cskia_path_measure_get_length(cskia_path_measure_t* measure) { return as_measure(measure)->getLength(); }
+bool  cskia_path_measure_get_pos_tan(cskia_path_measure_t* measure, float distance, float* position, float* tangent) {
+    SkPoint pos;
+    SkVector tan;
+    if (!as_measure(measure)->getPosTan(distance, &pos, &tan)) { return false; }
+    if (position) { position[0] = pos.fX; position[1] = pos.fY; }
+    if (tangent) { tangent[0] = tan.fX; tangent[1] = tan.fY; }
+    return true;
+}
+bool cskia_path_measure_get_segment(cskia_path_measure_t* measure, float start, float stop, cskia_path_t* dst, bool start_with_move_to) {
+    return as_measure(measure)->getSegment(start, stop, as_path(dst), start_with_move_to);
+}
+bool cskia_path_measure_is_closed(cskia_path_measure_t* measure) { return as_measure(measure)->isClosed(); }
+bool cskia_path_measure_next_contour(cskia_path_measure_t* measure) { return as_measure(measure)->nextContour(); }
+
 // MARK: - SkShader
 
 cskia_shader_t* cskia_shader_make_linear_gradient(float x0, float y0, float x1, float y1, const float* colors, const float* positions, int32_t count, int32_t mode) {
@@ -386,6 +686,13 @@ cskia_shader_t* cskia_shader_make_sweep_gradient(float cx, float cy, float start
 
 cskia_shader_t* cskia_shader_make_color(float r, float g, float b, float a) {
     return release_to<SkShader, cskia_shader_t>(SkShaders::Color(SkColor4f{r, g, b, a}, nullptr));
+}
+
+cskia_shader_t* cskia_shader_make_image(const cskia_image_t* image, int32_t tile_x, int32_t tile_y, const cskia_sampling* s, const cskia_matrix* matrix) {
+    if (!image) { return nullptr; }
+    SkMatrix local = matrix ? to_matrix(matrix) : SkMatrix::I();
+    return release_to<SkShader, cskia_shader_t>(
+        as_image(image)->makeShader(tile_mode(tile_x), tile_mode(tile_y), sampling(s), &local));
 }
 
 void cskia_shader_ref(cskia_shader_t* shader) { SkSafeRef(as_shader(shader)); }
@@ -445,8 +752,79 @@ int32_t cskia_typeface_count_glyphs(const cskia_typeface_t* typeface) {
     return typeface ? as_typeface(typeface)->countGlyphs() : 0;
 }
 
+void cskia_typeface_get_style(const cskia_typeface_t* typeface, int32_t* weight, int32_t* width, int32_t* slant) {
+    write_style(as_typeface(typeface)->fontStyle(), weight, width, slant);
+}
+bool cskia_typeface_is_bold(const cskia_typeface_t* typeface) { return as_typeface(typeface)->isBold(); }
+bool cskia_typeface_is_italic(const cskia_typeface_t* typeface) { return as_typeface(typeface)->isItalic(); }
+bool cskia_typeface_is_fixed_pitch(const cskia_typeface_t* typeface) { return as_typeface(typeface)->isFixedPitch(); }
+int32_t cskia_typeface_get_units_per_em(const cskia_typeface_t* typeface) { return as_typeface(typeface)->getUnitsPerEm(); }
+uint16_t cskia_typeface_unichar_to_glyph(const cskia_typeface_t* typeface, int32_t unichar) {
+    return as_typeface(typeface)->unicharToGlyph(unichar);
+}
+int32_t cskia_typeface_get_table_tags(const cskia_typeface_t* typeface, uint32_t* tags, int32_t max_tags) {
+    int count = as_typeface(typeface)->countTables();
+    if (tags && max_tags > 0) {
+        std::vector<SkFontTableTag> all(count);
+        as_typeface(typeface)->readTableTags({all.data(), all.size()});
+        std::copy_n(all.begin(), std::min(count, max_tags), tags);
+    }
+    return count;
+}
+size_t cskia_typeface_get_table_data(const cskia_typeface_t* typeface, uint32_t tag, size_t offset, size_t length, void* data) {
+    if (!data) { return as_typeface(typeface)->getTableSize(tag); }
+    return as_typeface(typeface)->getTableData(tag, offset, length, data);
+}
+
 void cskia_typeface_ref(cskia_typeface_t* typeface) { SkSafeRef(as_typeface(typeface)); }
 void cskia_typeface_unref(cskia_typeface_t* typeface) { SkSafeUnref(as_typeface(typeface)); }
+
+// MARK: - SkFontMgr
+
+int32_t cskia_font_mgr_count_families(void) {
+    sk_sp<SkFontMgr> mgr = font_mgr();
+    return mgr ? mgr->countFamilies() : 0;
+}
+size_t cskia_font_mgr_get_family_name(int32_t index, char* buffer, size_t capacity) {
+    sk_sp<SkFontMgr> mgr = font_mgr();
+    if (!mgr || index < 0 || index >= mgr->countFamilies()) { return copy_string(SkString(), buffer, capacity); }
+    SkString name;
+    mgr->getFamilyName(index, &name);
+    return copy_string(name, buffer, capacity);
+}
+cskia_font_style_set_t* cskia_font_mgr_match_family(const char* family) {
+    sk_sp<SkFontMgr> mgr = font_mgr();
+    sk_sp<SkFontStyleSet> set = mgr ? mgr->matchFamily(family) : nullptr;
+    if (!set) { set = SkFontStyleSet::CreateEmpty(); }
+    return release_to<SkFontStyleSet, cskia_font_style_set_t>(std::move(set));
+}
+cskia_typeface_t* cskia_font_mgr_match_family_style_character(const char* family, int32_t weight, int32_t width, int32_t slant, const char* const* bcp47, int32_t bcp47_count, int32_t unichar) {
+    sk_sp<SkFontMgr> mgr = font_mgr();
+    if (!mgr) { return nullptr; }
+    return release_to<SkTypeface, cskia_typeface_t>(mgr->matchFamilyStyleCharacter(
+        family, font_style(weight, width, slant), const_cast<const char**>(bcp47), std::max(bcp47_count, 0), unichar));
+}
+
+// MARK: - SkFontStyleSet
+
+int32_t cskia_font_style_set_count(cskia_font_style_set_t* set) { return as_style_set(set)->count(); }
+size_t cskia_font_style_set_get_style(cskia_font_style_set_t* set, int32_t index, int32_t* weight, int32_t* width, int32_t* slant, char* name, size_t capacity) {
+    SkFontStyle style;
+    SkString styleName;
+    if (index >= 0 && index < as_style_set(set)->count()) {
+        as_style_set(set)->getStyle(index, &style, &styleName);
+    }
+    write_style(style, weight, width, slant);
+    return copy_string(styleName, name, capacity);
+}
+cskia_typeface_t* cskia_font_style_set_create_typeface(cskia_font_style_set_t* set, int32_t index) {
+    if (index < 0 || index >= as_style_set(set)->count()) { return nullptr; }
+    return release_to<SkTypeface, cskia_typeface_t>(as_style_set(set)->createTypeface(index));
+}
+cskia_typeface_t* cskia_font_style_set_match_style(cskia_font_style_set_t* set, int32_t weight, int32_t width, int32_t slant) {
+    return release_to<SkTypeface, cskia_typeface_t>(as_style_set(set)->matchStyle(font_style(weight, width, slant)));
+}
+void cskia_font_style_set_unref(cskia_font_style_set_t* set) { SkSafeUnref(as_style_set(set)); }
 
 // MARK: - SkFont
 
@@ -520,6 +898,101 @@ float cskia_font_get_metrics(const cskia_font_t* font, cskia_font_metrics* out) 
 
 float cskia_font_get_spacing(const cskia_font_t* font) { return as_font(font)->getSpacing(); }
 
+bool    cskia_font_is_embolden(const cskia_font_t* font) { return as_font(font)->isEmbolden(); }
+bool    cskia_font_is_subpixel(const cskia_font_t* font) { return as_font(font)->isSubpixel(); }
+bool    cskia_font_is_linear_metrics(const cskia_font_t* font) { return as_font(font)->isLinearMetrics(); }
+bool    cskia_font_is_baseline_snap(const cskia_font_t* font) { return as_font(font)->isBaselineSnap(); }
+void    cskia_font_set_force_auto_hinting(cskia_font_t* font, bool force) { as_font(font)->setForceAutoHinting(force); }
+bool    cskia_font_is_force_auto_hinting(const cskia_font_t* font) { return as_font(font)->isForceAutoHinting(); }
+void    cskia_font_set_embedded_bitmaps(cskia_font_t* font, bool embedded) { as_font(font)->setEmbeddedBitmaps(embedded); }
+bool    cskia_font_is_embedded_bitmaps(const cskia_font_t* font) { return as_font(font)->isEmbeddedBitmaps(); }
+int32_t cskia_font_get_edging(const cskia_font_t* font) { return static_cast<int32_t>(as_font(font)->getEdging()); }
+int32_t cskia_font_get_hinting(const cskia_font_t* font) { return static_cast<int32_t>(as_font(font)->getHinting()); }
+
+uint16_t cskia_font_unichar_to_glyph(const cskia_font_t* font, int32_t unichar) { return as_font(font)->unicharToGlyph(unichar); }
+void cskia_font_unichars_to_glyphs(const cskia_font_t* font, const int32_t* unichars, int32_t count, uint16_t* glyphs) {
+    if (!unichars || !glyphs || count <= 0) { return; }
+    as_font(font)->unicharsToGlyphs({unichars, static_cast<size_t>(count)}, {glyphs, static_cast<size_t>(count)});
+}
+void cskia_font_get_widths_bounds(const cskia_font_t* font, const uint16_t* glyphs, int32_t count, float* widths, cskia_rect* bounds, const cskia_paint_t* paint) {
+    if (!glyphs || count <= 0) { return; }
+    std::vector<SkRect> rects(bounds ? count : 0);
+    as_font(font)->getWidthsBounds(glyph_span(glyphs, count),
+                                   widths ? SkSpan<SkScalar>(widths, count) : SkSpan<SkScalar>(),
+                                   SkSpan<SkRect>(rects.data(), rects.size()),
+                                   as_paint(paint));
+    for (size_t i = 0; i < rects.size(); ++i) { write_rect(rects[i], &bounds[i]); }
+}
+void cskia_font_get_pos(const cskia_font_t* font, const uint16_t* glyphs, int32_t count, float origin_x, float origin_y, float* positions) {
+    if (!glyphs || !positions || count <= 0) { return; }
+    as_font(font)->getPos(glyph_span(glyphs, count), {reinterpret_cast<SkPoint*>(positions), static_cast<size_t>(count)}, {origin_x, origin_y});
+}
+void cskia_font_get_x_pos(const cskia_font_t* font, const uint16_t* glyphs, int32_t count, float origin, float* xpos) {
+    if (!glyphs || !xpos || count <= 0) { return; }
+    as_font(font)->getXPos(glyph_span(glyphs, count), {xpos, static_cast<size_t>(count)}, origin);
+}
+bool cskia_font_get_path(const cskia_font_t* font, uint16_t glyph, cskia_path_t* out) {
+    std::optional<SkPath> path = as_font(font)->getPath(glyph);
+    if (!path) { return false; }
+    *as_path(out) = std::move(*path);
+    return true;
+}
+
+// MARK: - SkTextBlob
+
+cskia_text_blob_t* cskia_text_blob_make_from_text(const char* utf8, size_t byte_length, const cskia_font_t* font) {
+    if (!utf8 || byte_length == 0) { return nullptr; }
+    return release_to<SkTextBlob, cskia_text_blob_t>(SkTextBlob::MakeFromText(utf8, byte_length, *as_font(font), SkTextEncoding::kUTF8));
+}
+cskia_text_blob_t* cskia_text_blob_make_from_pos_glyphs(const uint16_t* glyphs, const float* positions, int32_t count, const cskia_font_t* font) {
+    if (!glyphs || !positions || count <= 0) { return nullptr; }
+    return release_to<SkTextBlob, cskia_text_blob_t>(SkTextBlob::MakeFromPosGlyphs(glyph_span(glyphs, count), points(positions, count), *as_font(font)));
+}
+cskia_text_blob_t* cskia_text_blob_make_from_pos_h_glyphs(const uint16_t* glyphs, const float* xpos, int32_t count, float y, const cskia_font_t* font) {
+    if (!glyphs || !xpos || count <= 0) { return nullptr; }
+    return release_to<SkTextBlob, cskia_text_blob_t>(SkTextBlob::MakeFromPosHGlyphs(glyph_span(glyphs, count), {xpos, static_cast<size_t>(count)}, y, *as_font(font)));
+}
+void cskia_text_blob_get_bounds(const cskia_text_blob_t* blob, cskia_rect* out) { write_rect(as_blob(blob)->bounds(), out); }
+int32_t cskia_text_blob_get_intercepts(const cskia_text_blob_t* blob, float upper, float lower, float* intervals, int32_t max, const cskia_paint_t* paint) {
+    const SkScalar band[2] = {upper, lower};
+    int count = as_blob(blob)->getIntercepts(band, nullptr, as_paint(paint));
+    if (intervals && max >= count) { as_blob(blob)->getIntercepts(band, intervals, as_paint(paint)); }
+    return count;
+}
+void cskia_text_blob_ref(cskia_text_blob_t* blob) { SkSafeRef(as_blob(blob)); }
+void cskia_text_blob_unref(cskia_text_blob_t* blob) { SkSafeUnref(as_blob(blob)); }
+
+// MARK: - SkTextBlobBuilder
+
+cskia_text_blob_builder_t* cskia_text_blob_builder_new(void) { return reinterpret_cast<cskia_text_blob_builder_t*>(new SkTextBlobBuilder()); }
+void cskia_text_blob_builder_delete(cskia_text_blob_builder_t* builder) { delete as_blob_builder(builder); }
+void cskia_text_blob_builder_add_run(cskia_text_blob_builder_t* builder, const cskia_font_t* font, const uint16_t* glyphs, int32_t count, float x, float y) {
+    if (!glyphs || count <= 0) { return; }
+    const auto& run = as_blob_builder(builder)->allocRun(*as_font(font), count, x, y);
+    std::copy_n(glyphs, count, run.glyphs);
+}
+void cskia_text_blob_builder_add_run_pos_h(cskia_text_blob_builder_t* builder, const cskia_font_t* font, const uint16_t* glyphs, const float* xpos, int32_t count, float y) {
+    if (!glyphs || !xpos || count <= 0) { return; }
+    const auto& run = as_blob_builder(builder)->allocRunPosH(*as_font(font), count, y);
+    std::copy_n(glyphs, count, run.glyphs);
+    std::copy_n(xpos, count, run.pos);
+}
+void cskia_text_blob_builder_add_run_pos(cskia_text_blob_builder_t* builder, const cskia_font_t* font, const uint16_t* glyphs, const float* positions, int32_t count) {
+    if (!glyphs || !positions || count <= 0) { return; }
+    const auto& run = as_blob_builder(builder)->allocRunPos(*as_font(font), count);
+    std::copy_n(glyphs, count, run.glyphs);
+    std::copy_n(positions, count * 2, run.pos);
+}
+cskia_text_blob_t* cskia_text_blob_builder_make(cskia_text_blob_builder_t* builder) {
+    return release_to<SkTextBlob, cskia_text_blob_t>(as_blob_builder(builder)->make());
+}
+
+// MARK: - SkData
+
+const void* cskia_data_get_bytes(const cskia_data_t* data) { return as_data(data)->data(); }
+size_t cskia_data_get_size(const cskia_data_t* data) { return as_data(data)->size(); }
+void cskia_data_unref(cskia_data_t* data) { SkSafeUnref(as_data(data)); }
+
 // MARK: - SkImage
 
 cskia_image_t* cskia_image_make_raster_copy(const void* pixels, int32_t width, int32_t height, size_t row_bytes, int32_t color_type, int32_t alpha_type) {
@@ -533,6 +1006,72 @@ cskia_image_t* cskia_image_make_raster_copy(const void* pixels, int32_t width, i
 
 int32_t cskia_image_get_width(const cskia_image_t* image) { return image ? as_image(image)->width() : 0; }
 int32_t cskia_image_get_height(const cskia_image_t* image) { return image ? as_image(image)->height() : 0; }
+cskia_image_t* cskia_image_make_from_encoded(const void* data, size_t size) {
+    if (!data || size == 0) { return nullptr; }
+    return release_to<SkImage, cskia_image_t>(SkImages::DeferredFromEncodedData(SkData::MakeWithCopy(data, size)));
+}
+int32_t cskia_image_get_color_type(const cskia_image_t* image) {
+    switch (as_image(image)->colorType()) {
+        case kRGBA_8888_SkColorType: return 0;
+        case kBGRA_8888_SkColorType: return 1;
+        default: return -1;
+    }
+}
+int32_t cskia_image_get_alpha_type(const cskia_image_t* image) { return static_cast<int32_t>(as_image(image)->alphaType()); }
+bool cskia_image_is_opaque(const cskia_image_t* image) { return as_image(image)->isOpaque(); }
+bool cskia_image_read_pixels(const cskia_image_t* image, void* pixels, size_t row_bytes, int32_t width, int32_t height, int32_t ct, int32_t at, int32_t src_x, int32_t src_y) {
+    if (!pixels || width <= 0 || height <= 0) { return false; }
+    SkImageInfo info = SkImageInfo::Make(width, height, color_type(ct), alpha_type(at));
+    return as_image(image)->readPixels(nullptr, info, pixels, row_bytes, src_x, src_y);
+}
+bool cskia_image_peek_pixels(const cskia_image_t* image, const void** pixels, size_t* row_bytes) {
+    SkPixmap pixmap;
+    if (!as_image(image)->peekPixels(&pixmap)) { return false; }
+    if (pixels) { *pixels = pixmap.addr(); }
+    if (row_bytes) { *row_bytes = pixmap.rowBytes(); }
+    return true;
+}
+cskia_image_t* cskia_image_make_subset(const cskia_image_t* image, int32_t x, int32_t y, int32_t w, int32_t h) {
+    SkIRect subset = SkIRect::MakeXYWH(x, y, w, h);
+    if (w <= 0 || h <= 0 || !SkIRect::MakeWH(as_image(image)->width(), as_image(image)->height()).contains(subset)) { return nullptr; }
+    return release_to<SkImage, cskia_image_t>(as_image(image)->makeSubset(nullptr, subset, {}));
+}
+cskia_image_t* cskia_image_make_raster_image(const cskia_image_t* image) {
+    return release_to<SkImage, cskia_image_t>(as_image(image)->makeRasterImage());
+}
+
+#if !defined(__wasm__)
+cskia_data_t* cskia_image_encode(const cskia_image_t* image, int32_t format, int32_t quality) {
+    // The encoders read a pixmap: a lazy image is decoded for them first.
+    sk_sp<SkImage> raster = as_image(image)->makeRasterImage();
+    SkPixmap pixmap;
+    if (!raster || !raster->peekPixels(&pixmap)) { return nullptr; }
+    quality = std::clamp(quality, 0, 100);
+    sk_sp<SkData> data;
+    switch (format) {
+        case 0: data = SkPngEncoder::Encode(pixmap, {}); break;
+        case 1: {
+            SkJpegEncoder::Options options;
+            options.fQuality = quality;
+            data = SkJpegEncoder::Encode(pixmap, options);
+            break;
+        }
+        case 2: {
+            SkWebpEncoder::Options options;
+            options.fCompression = quality >= 100 ? SkWebpEncoder::Compression::kLossless : SkWebpEncoder::Compression::kLossy;
+            options.fQuality = static_cast<float>(quality);
+            data = SkWebpEncoder::Encode(pixmap, options);
+            break;
+        }
+        default: break;
+    }
+    return release_to<SkData, cskia_data_t>(std::move(data));
+}
+#else
+// The browser's Skia has no encoders.
+cskia_data_t* cskia_image_encode(const cskia_image_t*, int32_t, int32_t) { return nullptr; }
+#endif
+
 void cskia_image_ref(cskia_image_t* image) { SkSafeRef(as_image(image)); }
 void cskia_image_unref(cskia_image_t* image) { SkSafeUnref(as_image(image)); }
 

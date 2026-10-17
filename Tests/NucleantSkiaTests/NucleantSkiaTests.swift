@@ -5,22 +5,22 @@ import Testing
 // Everything draws into a CPU raster surface and reads the pixels back, so
 // these run without a GPU or a window.
 
-private let white = SIMD4<Float>(1, 1, 1, 1)
-private let red   = SIMD4<Float>(1, 0, 0, 1)
-private let blue  = SIMD4<Float>(0, 0, 1, 1)
+let white = SIMD4<Float>(1, 1, 1, 1)
+let red   = SIMD4<Float>(1, 0, 0, 1)
+let blue  = SIMD4<Float>(0, 0, 1, 1)
 
-private func makeSurface(_ width: Int32 = 64, _ height: Int32 = 64) throws -> SkRasterSurface {
+func makeSurface(_ width: Int32 = 64, _ height: Int32 = 64) throws -> SkRasterSurface {
     let surface = try #require(SkSurfaces.raster(width: width, height: height))
     surface.getCanvas().clear(white)
     return surface
 }
 
-private func isClose(_ a: SIMD4<UInt8>?, _ b: SIMD4<UInt8>, tolerance: Int = 2) -> Bool {
+func isClose(_ a: SIMD4<UInt8>?, _ b: SIMD4<UInt8>, tolerance: Int = 2) -> Bool {
     guard let a else { return false }
     return (0..<4).allSatisfy { abs(Int(a[$0]) - Int(b[$0])) <= tolerance }
 }
 
-private func roboto() throws -> SkTypeface {
+func roboto() throws -> SkTypeface {
     let url = try #require(Bundle.module.url(forResource: "Roboto-Regular", withExtension: "ttf", subdirectory: "Resources"))
     let bytes = try [UInt8](Data(contentsOf: url))
     return try #require(SkFontMgr.makeFromData(bytes))
@@ -397,6 +397,12 @@ private func svg(_ source: String) -> SkSVGDOM? {
     Array(source.utf8).withUnsafeBytes { SkSVGDOM.make($0) }
 }
 
+// The browser's Skia has no SVG module: nothing parses there.
+#if os(WASI)
+@Test func svgIsUnavailableInTheBrowser() {
+    #expect(svg("<svg xmlns='http://www.w3.org/2000/svg' width='40' height='20'/>") == nil)
+}
+#else
 @Test func svgKnowsItsSizeAndViewBox() throws {
     let sized = try #require(svg("<svg xmlns='http://www.w3.org/2000/svg' width='40' height='20'/>"))
     #expect(sized.intrinsicSize() == SIMD2(40, 20))
@@ -441,3 +447,4 @@ private func svg(_ source: String) -> SkSVGDOM? {
     #expect(inked > 20)
     #expect(surface.readPixel(x: 110, y: 20) == SIMD4(255, 255, 255, 255))
 }
+#endif

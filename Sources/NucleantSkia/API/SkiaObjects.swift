@@ -42,6 +42,18 @@ public final class SkPath: SkiaPath {
 
     private init(base: OpaquePointer) { self.base = base }
 
+    /// SkParsePath::FromSVGString — an SVG path's `d`; nil when it doesn't parse.
+    public convenience init?(svg: String) {
+        guard let parsed = cskia_path_make_from_svg_string(svg) else { return nil }
+        self.init(base: parsed)
+    }
+
+    /// What `serialize()` wrote; nil for anything else.
+    public convenience init?(serialized bytes: [UInt8]) {
+        guard let read = bytes.withUnsafeBytes({ cskia_path_read_from_memory($0.baseAddress, $0.count) }) else { return nil }
+        self.init(base: read)
+    }
+
     public func copy() -> SkPath { SkPath(base: cskia_path_copy(base)) }
 
     deinit { cskia_path_delete(base) }
@@ -94,6 +106,13 @@ public final class SkImage: SkiaImage {
     public let base: OpaquePointer
 
     init(adopting base: OpaquePointer) { self.base = base }
+
+    /// An encoded image (PNG, JPEG, …), decoded when first drawn; nil when
+    /// no decoder this Skia has reads it. The bytes are copied.
+    public convenience init?(encoded bytes: [UInt8]) {
+        guard let made = bytes.withUnsafeBytes({ cskia_image_make_from_encoded($0.baseAddress, $0.count) }) else { return nil }
+        self.init(adopting: made)
+    }
 
     deinit { cskia_image_unref(base) }
 }

@@ -158,6 +158,48 @@ public extension SkiaCanvas {
         cskia_canvas_draw_image_rect(base, image.base, pos.x, pos.y, size.x, size.y, paint.base)
     }
 
+    /// `src` of the image (pixels) into `dst`, with `sampling`. `strict`
+    /// keeps sampling inside `src`.
+    func drawImageRect<I: SkiaImage>(
+        _ image: I, src: (pos: SIMD2<Float>, size: SIMD2<Float>), dst: (pos: SIMD2<Float>, size: SIMD2<Float>),
+        sampling: SkSamplingOptions = .linear, constraint: SkSrcRectConstraint = .strict
+    ) {
+        imageRect(image.base, src: src, dst: dst, sampling: sampling, paint: nil, constraint: constraint)
+    }
+    func drawImageRect<I: SkiaImage, P: SkiaPaint>(
+        _ image: I, src: (pos: SIMD2<Float>, size: SIMD2<Float>), dst: (pos: SIMD2<Float>, size: SIMD2<Float>),
+        sampling: SkSamplingOptions = .linear, paint: P, constraint: SkSrcRectConstraint = .strict
+    ) {
+        imageRect(image.base, src: src, dst: dst, sampling: sampling, paint: paint.base, constraint: constraint)
+    }
+
+    private func imageRect(
+        _ image: OpaquePointer, src: (pos: SIMD2<Float>, size: SIMD2<Float>), dst: (pos: SIMD2<Float>, size: SIMD2<Float>),
+        sampling: SkSamplingOptions, paint: OpaquePointer?, constraint: SkSrcRectConstraint
+    ) {
+        var s = cskia_rect(pos: src.pos, size: src.size)
+        var d = cskia_rect(pos: dst.pos, size: dst.size)
+        var options = sampling.c
+        cskia_canvas_draw_image_rect_src(base, image, &s, &d, &options, paint, constraint.rawValue)
+    }
+
+    /// Nine-patch into `dst`: the image's `center` (pixels) stretches, the
+    /// corners around it keep their size, the edges stretch one way.
+    func drawImageNine<I: SkiaImage>(
+        _ image: I, center: (pos: SIMD2<Int32>, size: SIMD2<Int32>), dst: (pos: SIMD2<Float>, size: SIMD2<Float>),
+        filter: SkFilterMode = .linear
+    ) {
+        var d = cskia_rect(pos: dst.pos, size: dst.size)
+        cskia_canvas_draw_image_nine(base, image.base, center.pos.x, center.pos.y, center.size.x, center.size.y, &d, filter.rawValue, nil)
+    }
+    func drawImageNine<I: SkiaImage, P: SkiaPaint>(
+        _ image: I, center: (pos: SIMD2<Int32>, size: SIMD2<Int32>), dst: (pos: SIMD2<Float>, size: SIMD2<Float>),
+        filter: SkFilterMode = .linear, paint: P
+    ) {
+        var d = cskia_rect(pos: dst.pos, size: dst.size)
+        cskia_canvas_draw_image_nine(base, image.base, center.pos.x, center.pos.y, center.size.x, center.size.y, &d, filter.rawValue, paint.base)
+    }
+
     // MARK: text
 
     /// `pos` is the baseline origin.
@@ -168,6 +210,18 @@ public extension SkiaCanvas {
                 cskia_canvas_draw_simple_text(base, $0.baseAddress, $0.count, pos.x, pos.y, font.base, paint.base)
             }
         }
+    }
+
+    /// The blob with its origin at `pos`.
+    func drawTextBlob<Blob: SkiaTextBlob, P: SkiaPaint>(_ blob: Blob, pos: SIMD2<Float>, paint: P) {
+        cskia_canvas_draw_text_blob(base, blob.base, pos.x, pos.y, paint.base)
+    }
+
+    /// Glyphs at their own positions, shifted by `origin`.
+    func drawGlyphs<Font: SkiaFont, P: SkiaPaint>(_ glyphs: [UInt16], positions: [SIMD2<Float>], origin: SIMD2<Float> = .zero, font: Font, paint: P) {
+        precondition(glyphs.count == positions.count, "one position per glyph")
+        let xy = positions.flatMap { [$0.x, $0.y] }
+        cskia_canvas_draw_glyphs(base, glyphs, xy, Int32(glyphs.count), origin.x, origin.y, font.base, paint.base)
     }
 
     /// SkCanvas::drawString — `drawSimpleText` with UTF-8.
