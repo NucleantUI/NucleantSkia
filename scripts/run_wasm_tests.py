@@ -173,10 +173,12 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     chrome = find_chrome(args.chrome)
+    # Built first: without a sibling checkout, the build is what fetches
+    # NucleantVulkan, Web/ included.
+    product = build_tests()
     Handler.vulkan_web = nucleant_vulkan_web()
     if not (Handler.vulkan_web / "naga_webgpu.wasm").is_file():
         sys.exit("error: NucleantVulkan's Web/naga_webgpu.wasm is missing; run its scripts/build_naga_wasm.py")
-    product = build_tests()
     Handler.manifest = json.dumps(files_manifest(product.parent)).encode()
 
     handler = functools.partial(Handler, directory=str(PACKAGE_ROOT))
