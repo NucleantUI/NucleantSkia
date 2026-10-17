@@ -207,6 +207,9 @@ func prebuiltSkiaTargets(_ skia: Target) -> [Target] {
                 ],
                 linkerSettings: [
                     .linkedLibrary("fontconfig"),
+                    // Linux's Skia takes the system's expat (SVG's XML
+                    // parser), as it does zlib.
+                    .linkedLibrary("expat"),
                     .linkedLibrary("pthread"),
                     .linkedLibrary("dl"),
                     .linkedLibrary("rt"),

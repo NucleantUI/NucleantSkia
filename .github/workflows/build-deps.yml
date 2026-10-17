@@ -83,13 +83,13 @@ jobs:
     timeout-minutes: 360
     steps:
       - uses: actions/checkout@v7
-      # Skia's build, and Skia's (fontconfig, zlib) and NucleantVulkan's
+      # Skia's build, and Skia's (fontconfig, expat, zlib) and NucleantVulkan's
       # system libraries for the tests.
       - name: System packages
         run: >
           apt-get update && apt-get install -y
           g++ python3 ninja-build patch curl
-          libfontconfig1-dev zlib1g-dev
+          libfontconfig1-dev libexpat1-dev zlib1g-dev
           libvulkan-dev libwayland-dev libxcb1-dev libx11-dev libshaderc-dev libspirv-cross-c-shared-dev
       - name: skia-python
         run: |
