@@ -19,6 +19,12 @@ name: build-deps
 
 on:
   workflow_dispatch:
+    inputs:
+      platform:
+        description: Platform to build (all, or one to retry)
+        type: choice
+        options: [all, apple, linux, android, wasm]
+        default: all
   workflow_call:
     inputs:
       version:
@@ -36,6 +42,7 @@ env:
 
 jobs:
   apple:
+    if: inputs.platform == '' || inputs.platform == 'all' || inputs.platform == 'apple'
     # One arm64 Mac builds every configuration: macOS arm64 + x86_64, iOS,
     # and the simulator's arm64 + x86_64.
     runs-on: macos-15
@@ -67,6 +74,7 @@ jobs:
           swift test
 
   linux:
+    if: inputs.platform == '' || inputs.platform == 'all' || inputs.platform == 'linux'
     # x86_64, as Dependencies/linux, and the one Linux architecture
     # NucleantVulkan vendors wgpu-native for. In Swift's own image, which has
     # the toolchain; Ubuntu 24.04's GCC builds Skia, as Dependencies/linux is.
@@ -115,13 +123,15 @@ jobs:
           swift test
 
   android:
+    if: inputs.platform == '' || inputs.platform == 'all' || inputs.platform == 'android'
     # Both ABIs on one machine, in Swift's image for the cross-compile after.
     runs-on: ubuntu-24.04
     container: swift:6.3.3-noble
     timeout-minutes: 360
     steps:
       - uses: actions/checkout@v7
-      - run: apt-get update && apt-get install -y python3 ninja-build patch curl unzip
+      # g++: Skia's GN asks the host compiler (cc) for its version.
+      - run: apt-get update && apt-get install -y g++ python3 ninja-build patch curl unzip
       # NDK r28, the line Dependencies/android is built with.
       - uses: nttld/setup-ndk@v1
         id: ndk
@@ -174,6 +184,7 @@ jobs:
           done
 
   wasm:
+    if: inputs.platform == '' || inputs.platform == 'all' || inputs.platform == 'wasm'
     # build_skia_wasm.py runs Skia's build with the clang of the swift.org
     # toolchain matching the wasm SDK, from ~/Library/Developer/Toolchains.
     runs-on: macos-15
