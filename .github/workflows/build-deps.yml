@@ -43,8 +43,8 @@ env:
 jobs:
   apple:
     if: inputs.platform == '' || inputs.platform == 'all' || inputs.platform == 'apple'
-    # One arm64 Mac builds every configuration: macOS arm64 + x86_64, iOS,
-    # and the simulator's arm64 + x86_64.
+    # One arm64 Mac builds every configuration, a step each: macOS arm64 +
+    # x86_64, iOS, and the simulator's arm64 + x86_64.
     runs-on: macos-15
     timeout-minutes: 360
     steps:
@@ -54,8 +54,17 @@ jobs:
         with:
           python-version: "3.13"
       - run: brew install ninja
-      - name: Build Skia
-        run: python scripts/build_skia_apple.py build --out apple
+      # One step per configuration, out of one Skia checkout (synced by the first).
+      - name: Build macOS arm64
+        run: python scripts/build_skia_apple.py build --out apple --config macos-arm64
+      - name: Build macOS x86_64
+        run: python scripts/build_skia_apple.py build --out apple --config macos-x64 --skip-sync
+      - name: Build iOS arm64
+        run: python scripts/build_skia_apple.py build --out apple --config ios-arm64 --skip-sync
+      - name: Build iOS simulator arm64
+        run: python scripts/build_skia_apple.py build --out apple --config ios-sim-arm64 --skip-sync
+      - name: Build iOS simulator x86_64
+        run: python scripts/build_skia_apple.py build --out apple --config ios-sim-x64 --skip-sync
       - name: Package
         run: python scripts/build_skia_apple.py package --inputs apple/* --output dist
       - uses: actions/upload-artifact@v7
@@ -124,7 +133,8 @@ jobs:
 
   android:
     if: inputs.platform == '' || inputs.platform == 'all' || inputs.platform == 'android'
-    # Both ABIs on one machine, in Swift's image for the cross-compile after.
+    # Both ABIs on one machine, a step each, in Swift's image for the
+    # cross-compile after.
     runs-on: ubuntu-24.04
     container: swift:6.3.3-noble
     timeout-minutes: 360
@@ -147,20 +157,25 @@ jobs:
           mv ../skia-python/depot_tools/ninja ../skia-python/depot_tools/ninja.bak
           mv ../skia-python/depot_tools/gn ../skia-python/depot_tools/gn.bak
           echo "$(cd ../skia-python/skia && pwd)/bin" >> "$GITHUB_PATH"
-      - name: Build Skia
-        run: |
-          rm -rf Dependencies/android
-          python3 scripts/build_skia.py --android --abis arm64-v8a,x86_64
-      - name: Package
-        run: |
-          for abi in arm64-v8a x86_64; do
-            case "$abi" in arm64-v8a) arch=aarch64 ;; x86_64) arch=x86_64 ;; esac
-            python3 scripts/make_artifactbundle.py \
-              --lib-dir "Dependencies/android/$abi/lib" --include Dependencies/android/include \
-              --triple "$arch-unknown-linux-android28" \
-              --name "skia-android-$abi" --output dist --version "$VERSION" \
-              --ar "$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-ar"
-          done
+      - run: rm -rf Dependencies/android
+      - name: Build arm64-v8a
+        run: python3 scripts/build_skia.py --android --abis arm64-v8a
+      - name: Build x86_64
+        run: python3 scripts/build_skia.py --android --abis x86_64
+      - name: Package arm64-v8a
+        run: >
+          python3 scripts/make_artifactbundle.py
+          --lib-dir Dependencies/android/arm64-v8a/lib --include Dependencies/android/include
+          --triple aarch64-unknown-linux-android28
+          --name skia-android-arm64-v8a --output dist --version "$VERSION"
+          --ar "$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-ar"
+      - name: Package x86_64
+        run: >
+          python3 scripts/make_artifactbundle.py
+          --lib-dir Dependencies/android/x86_64/lib --include Dependencies/android/include
+          --triple x86_64-unknown-linux-android28
+          --name skia-android-x86_64 --output dist --version "$VERSION"
+          --ar "$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-ar"
       - uses: actions/upload-artifact@v7
         with:
           name: skia-android
@@ -181,15 +196,17 @@ jobs:
           fi
           "$setup"
       # Cross-compiled: builds and links the tests, which no device runs here.
-      - name: Build against it
+      - run: mkdir -p Artifacts && cp dist/skia-android-*.artifactbundle.zip Artifacts/
+      - name: Build against it, arm64-v8a
         env:
           ANDROID_BUILD: "1"
-        run: |
-          mkdir -p Artifacts && cp dist/skia-android-*.artifactbundle.zip Artifacts/
-          for abi in arm64-v8a x86_64; do
-            case "$abi" in arm64-v8a) arch=aarch64 ;; x86_64) arch=x86_64 ;; esac
-            SWIFT_ANDROID_ABI="$abi" swift build --swift-sdk "$arch-unknown-linux-android28" --build-tests
-          done
+          SWIFT_ANDROID_ABI: arm64-v8a
+        run: swift build --swift-sdk aarch64-unknown-linux-android28 --build-tests
+      - name: Build against it, x86_64
+        env:
+          ANDROID_BUILD: "1"
+          SWIFT_ANDROID_ABI: x86_64
+        run: swift build --swift-sdk x86_64-unknown-linux-android28 --build-tests
 
   wasm:
     if: inputs.platform == '' || inputs.platform == 'all' || inputs.platform == 'wasm'
