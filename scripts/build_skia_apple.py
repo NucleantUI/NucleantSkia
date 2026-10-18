@@ -4,7 +4,8 @@ package it as one Skia.xcframework.zip — the Apple counterpart of
 build_skia.py + make_artifactbundle.py.
 
 From nucleant_dev/skia-build's build_skia_macos.py and build_skia_ios.py:
-the same Skia branch, GN arguments and build steps, for every configuration
+the same Skia revision as every other platform (SKIA_REVISION), GN arguments
+and build steps, for every configuration
 — macos-arm64, macos-x64, ios-arm64, ios-sim-arm64, ios-sim-x64 — on one Mac,
 then packaged:
 
@@ -36,6 +37,9 @@ import time
 ROOT = os.path.dirname(os.path.abspath(__file__))
 SKIA_DIR = os.path.join(ROOT, ".work", "skia-apple")
 SKIA_REPO = "https://skia.googlesource.com/skia.git"
+# skia-python's `skia` submodule (m144) — the revision build_skia.py builds
+# for Linux and Android and build_skia_wasm.py for wasm: one Skia everywhere.
+SKIA_REVISION = "2708a1b1540e59b8e3407405b0c991a5c7b69523"
 
 # Built as their own targets next to libskia.a; all merged into libSkia.a.
 MODULE_LIBS = [
@@ -99,12 +103,15 @@ def run_retry(cmd, cwd, attempts):
             print(f"! build attempt {attempt}/{attempts} failed, retrying (ninja will only redo the missing objects)", flush=True)
 
 
-def clone_or_update(branch):
+def clone_or_update(revision):
     if not os.path.isdir(os.path.join(SKIA_DIR, ".git")):
-        run(["git", "clone", "--depth", "1", "--branch", branch, SKIA_REPO, SKIA_DIR])
-    else:
-        run(["git", "fetch", "--depth", "1", "origin", branch], cwd=SKIA_DIR)
-        run(["git", "checkout", "FETCH_HEAD"], cwd=SKIA_DIR)
+        os.makedirs(SKIA_DIR, exist_ok=True)
+        run(["git", "init", "-q", SKIA_DIR])
+        run(["git", "remote", "add", "origin", SKIA_REPO], cwd=SKIA_DIR)
+    head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=SKIA_DIR, capture_output=True, text=True).stdout.strip()
+    if head != revision:
+        run(["git", "fetch", "-q", "--depth", "1", "origin", revision], cwd=SKIA_DIR)
+        run(["git", "checkout", "-q", "--force", "FETCH_HEAD"], cwd=SKIA_DIR)
 
 
 def sync_deps():
@@ -232,7 +239,7 @@ def _copy_module_headers(staging, mod, whole=False):
 def build(ns):
     """Each configuration in turn, out of one checkout, into <out>/<config>."""
     if not ns.skip_sync:
-        clone_or_update(ns.branch)
+        clone_or_update(ns.revision)
         sync_deps()
     patch_skia_sources()
     for config in ns.config:
@@ -327,7 +334,7 @@ def main():
     b.add_argument("--config", nargs="+", default=list(CONFIGS), choices=list(CONFIGS),
                    help="configurations to build (default: all)")
     b.add_argument("--out", required=True, help="directory for <config>/lib and <config>/include")
-    b.add_argument("--branch", default="chrome/m144")
+    b.add_argument("--revision", default=SKIA_REVISION, help="Skia commit to build")
     b.add_argument("--min-macos", default="14.0")
     b.add_argument("--min-ios", default="17.0")
     b.add_argument("--skip-sync", action="store_true")

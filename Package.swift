@@ -5,10 +5,10 @@ import Foundation
 import PackageDescription
 
 /// Build against the sibling `../NucleantVulkan` checkout or against its
-/// `master` on GitHub — decided the same way in every Nucleant package:
-/// `NUCLEANT_LOCAL_DEV=1|0` in the environment wins; otherwise local when the
-/// sibling checkout exists next to this package. (A package fetched by
-/// revision may not have path dependencies, so a clone SwiftPM made under
+/// release on GitHub (from 0.0.1) — decided the same way in every Nucleant
+/// package: `NUCLEANT_LOCAL_DEV=1|0` in the environment wins; otherwise local
+/// when the sibling checkout exists next to this package. (A package fetched
+/// by version may not have path dependencies, so a clone SwiftPM made under
 /// `.build/checkouts` has to take the GitHub one.)
 let devMode: Bool = {
     if let flag = ProcessInfo.processInfo.environment["NUCLEANT_LOCAL_DEV"] {
@@ -216,15 +216,13 @@ func prebuiltSkiaTargets(_ skia: Target) -> [Target] {
                     .headerSearchPath("skia"),
                 ],
                 linkerSettings: [
+                    // The machine's font configuration; expat and zlib are
+                    // Skia's own, inside libSkia.a.
                     .linkedLibrary("fontconfig"),
-                    // Linux's Skia takes the system's expat (SVG's XML
-                    // parser), as it does zlib.
-                    .linkedLibrary("expat"),
                     .linkedLibrary("pthread"),
                     .linkedLibrary("dl"),
                     .linkedLibrary("rt"),
                     .linkedLibrary("m"),
-                    .linkedLibrary("z"),
                 ]
             ),
         ]
@@ -260,7 +258,7 @@ func getDependencies() -> [Package.Dependency] {
         ]
     }
     return [
-        .package(url: "https://github.com/NucleantUI/NucleantVulkan.git", branch: "master"),
+        .package(url: "https://github.com/NucleantUI/NucleantVulkan.git", from: "0.0.1"),
     ]
 }
 

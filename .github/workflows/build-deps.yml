@@ -10,7 +10,7 @@
 #   wasm     skia-wasm32.artifactbundle.zip             /
 #
 # The archives are this run's artifacts ("skia-*"). Run it by hand to check
-# that the dependencies still build; release.yml runs it for each tag and
+# that the dependencies still build; release.yml runs it for each release and
 # attaches the archives to the release.
 #
 # The tests take the archive through Package.swift's Artifacts/ directory, so
@@ -100,19 +100,22 @@ jobs:
     timeout-minutes: 360
     steps:
       - uses: actions/checkout@v7
-      # Skia's build, and Skia's (fontconfig, expat, zlib) and NucleantVulkan's
-      # system libraries for the tests.
+      # Skia's build, against the machine's fontconfig (expat and zlib are
+      # Skia's own).
       - name: System packages
         run: >
           apt-get update && apt-get install -y
-          g++ python3 ninja-build patch curl
-          libfontconfig1-dev libexpat1-dev zlib1g-dev
-          libvulkan-dev libwayland-dev libxcb1-dev libx11-dev libshaderc-dev libspirv-cross-c-shared-dev
+          g++ git python3 ninja-build patch curl libfontconfig1-dev
       - name: skia-python
         run: |
           # build_skia.py builds out of skia-python, next to this checkout.
           git config --global --add safe.directory '*'
-          git clone --depth 1 https://github.com/NucleantUI/skia-python.git ../skia-python
+          # At the commit build_skia.py builds from (SKIA_PYTHON_REF): its
+          # skia submodule is the Skia every platform builds.
+          ref=$(sed -n 's/^SKIA_PYTHON_REF = "\(.*\)"$/\1/p' scripts/build_skia.py)
+          git init -q ../skia-python
+          git -C ../skia-python fetch -q --depth 1 https://github.com/NucleantUI/skia-python.git "$ref"
+          git -C ../skia-python checkout -q FETCH_HEAD
           git -C ../skia-python submodule update --init --depth 1 depot_tools skia
           # As skia-python's own Linux build: the system's ninja and Skia's
           # own gn (bin/fetch-gn, run by git-sync-deps), not depot_tools' wrappers.
@@ -134,14 +137,30 @@ jobs:
         with:
           name: skia-linux-${{ matrix.arch }}
           path: dist/skia-linux-${{ matrix.arch }}.artifactbundle.zip
-      # Not on aarch64 yet: the tests link NucleantVulkan from its master,
-      # whose vendored wgpu-native is x86_64 only. Its prebuilt aarch64 bundle
-      # covers that once NucleantSkia depends on a NucleantVulkan release.
+
+  linux-test:
+    name: linux test (${{ matrix.arch }})
+    needs: linux
+    # A fresh Swift image with only libfontconfig1-dev, the one system
+    # library Skia links: the bundle and NucleantVulkan's release (with its
+    # own libraries) have to build and run the tests, as on a user's machine.
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { arch: x86_64, runner: ubuntu-24.04 }
+          - { arch: aarch64, runner: ubuntu-24.04-arm }
+    runs-on: ${{ matrix.runner }}
+    container: swift:6.3.3-noble
+    steps:
+      - uses: actions/checkout@v7
+      - run: apt-get update && apt-get install -y libfontconfig1-dev
+      - uses: actions/download-artifact@v8
+        with:
+          name: skia-linux-${{ matrix.arch }}
+          path: Artifacts
       - name: Test against it, ${{ matrix.arch }}
-        if: matrix.arch == 'x86_64'
-        run: |
-          mkdir -p Artifacts && cp dist/skia-linux-${{ matrix.arch }}.artifactbundle.zip Artifacts/
-          swift test
+        run: swift test
 
   android:
     if: inputs.platform == '' || inputs.platform == 'all' || inputs.platform == 'android'
@@ -164,7 +183,12 @@ jobs:
       - name: skia-python
         run: |
           git config --global --add safe.directory '*'
-          git clone --depth 1 https://github.com/NucleantUI/skia-python.git ../skia-python
+          # At the commit build_skia.py builds from (SKIA_PYTHON_REF): its
+          # skia submodule is the Skia every platform builds.
+          ref=$(sed -n 's/^SKIA_PYTHON_REF = "\(.*\)"$/\1/p' scripts/build_skia.py)
+          git init -q ../skia-python
+          git -C ../skia-python fetch -q --depth 1 https://github.com/NucleantUI/skia-python.git "$ref"
+          git -C ../skia-python checkout -q FETCH_HEAD
           git -C ../skia-python submodule update --init --depth 1 depot_tools skia
           mv ../skia-python/depot_tools/ninja ../skia-python/depot_tools/ninja.bak
           mv ../skia-python/depot_tools/gn ../skia-python/depot_tools/gn.bak

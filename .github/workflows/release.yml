@@ -1,73 +1,222 @@
-# For each new tag: builds and tests Skia for every platform (build-deps.yml),
-# attaches the archives to the tag's GitHub release, and moves the tag to a
-# release commit made on top of the tagged one:
+# Releases NucleantSkia, run by hand with the version to release:
 #
-#   * Package.swift's `releasedSkia` filled in — each archive's release URL
-#     and checksum, which it turns into the "Skia" binary target, so SwiftPM
-#     downloads only the platform (and architecture) being built;
-#   * no Dependencies/ — the vendored archives stay on master, not in the
-#     release.
+#   1. check     the version is X.Y.Z;
+#   2. deps      builds and tests every platform's Skia from source
+#                (build-deps.yml), the archives as artifacts;
+#   3. release   makes the release commit on top of master, the commit it ran
+#                on:
+#                  * Package.swift's `releasedSkia` filled in (replacing the
+#                    previous release's): each archive's URL on this release
+#                    and its checksum (from `swift package compute-checksum`,
+#                    which a url binary target must carry), which make them
+#                    binary targets that SwiftPM downloads only for the
+#                    platform and architecture being built;
+#                  * no Dependencies/: the libraries are the release's.
+#                Then tags it with the version, publishes the GitHub release
+#                with the archives, and pushes the commit to master — last,
+#                so master never names archives that are not up yet. Master
+#                and the tag then build from the same archives. A version
+#                already released is re-released: its release and tag are
+#                replaced — only now, with everything built, tested and
+#                checked;
+#   4. verify    a new package that depends on the release by its version and
+#                builds and runs against it on Linux, in Swift's image with
+#                only libfontconfig1-dev (the one system library Skia links):
+#                the URLs, checksums and manifest as a consumer gets them.
 #
-# The checksum is the archive's SHA-256, what `swift package compute-checksum`
-# gives. A tag pushed with GITHUB_TOKEN starts no workflow, so moving the tag
-# does not run this again.
+# The tag and master are pushed with GITHUB_TOKEN, so they start no workflow.
 
 name: release
 
 on:
-  push:
-    tags: ["*"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Version to release, X.Y.Z (the tag)
+        type: string
+        required: true
 
 permissions:
   contents: write
 
+env:
+  TAG: ${{ inputs.version }}
+
 jobs:
+  check:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Version
+        run: |
+          semver='^[0-9]+\.[0-9]+\.[0-9]+$'
+          [[ "$TAG" =~ $semver ]] || { echo "::error::version $TAG is not X.Y.Z"; exit 1; }
+          # The release commit goes onto master.
+          [ "$GITHUB_REF" = refs/heads/master ] || { echo "::error::run it on master, not $GITHUB_REF"; exit 1; }
+          if git ls-remote --exit-code --tags "https://github.com/$GITHUB_REPOSITORY" "refs/tags/$TAG" >/dev/null; then
+            echo "::notice::$TAG is released already: it will be re-released"
+          fi
+
   deps:
+    needs: check
     uses: ./.github/workflows/build-deps.yml
     with:
-      version: ${{ github.ref_name }}
+      version: ${{ inputs.version }}
 
   release:
     needs: deps
     runs-on: ubuntu-24.04
+    # Swift's image, to evaluate the release commit's manifest before it is
+    # published.
+    container: swift:6.3.3-noble
     env:
-      TAG: ${{ github.ref_name }}
       GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      NUCLEANT_LOCAL_DEV: "0"
     steps:
       - uses: actions/checkout@v7
+      - name: System packages
+        run: apt-get update && apt-get install -y gh python3
       - uses: actions/download-artifact@v8
         with:
           pattern: skia-*
           path: dist
           merge-multiple: true
-      - name: Release with the archives
+      # Every archive Package.swift names: a missing one would leave its
+      # binary target pointing at Artifacts/, which a consumer has not got.
+      - name: All the archives
         run: |
           ls -l dist
-          gh release view "$TAG" >/dev/null 2>&1 || gh release create "$TAG" --title "$TAG" --verify-tag --notes "Prebuilt Skia for every platform; SwiftPM downloads the one it builds for."
-          gh release upload "$TAG" dist/* --clobber
+          for archive in \
+            Skia.xcframework.zip \
+            skia-linux-x86_64.artifactbundle.zip skia-linux-aarch64.artifactbundle.zip \
+            skia-android-arm64-v8a.artifactbundle.zip skia-android-x86_64.artifactbundle.zip \
+            skia-wasm32.artifactbundle.zip
+          do
+            [ -f "dist/$archive" ] || { echo "::error::no $archive"; exit 1; }
+          done
       - name: Release commit
         run: |
           python3 - <<'EOF'
-          import hashlib, os, pathlib
+          import os, pathlib, re, subprocess
+
+          def checksum(path):
+              return subprocess.run(["swift", "package", "compute-checksum", str(path)],
+                                    check=True, capture_output=True, text=True).stdout.strip()
+
           base = f"https://github.com/{os.environ['GITHUB_REPOSITORY']}/releases/download/{os.environ['TAG']}"
           entries = "".join(
               f'    "{path.name}": (\n'
               f'        url: "{base}/{path.name}",\n'
-              f'        checksum: "{hashlib.sha256(path.read_bytes()).hexdigest()}"\n'
+              f'        checksum: "{checksum(path)}"\n'
               f'    ),\n'
               for path in sorted(pathlib.Path("dist").glob("*.zip"))
           )
           manifest = pathlib.Path("Package.swift")
-          empty = "let releasedSkia: [String: (url: String, checksum: String)] = [:]\n"
           text = manifest.read_text()
-          assert empty in text, "Package.swift has no empty releasedSkia to fill in"
-          manifest.write_text(text.replace(empty, empty.replace("[:]", "[\n" + entries + "]")))
+
+          # The previous release's entries, or none before the first.
+          declaration = re.compile(
+              r"let releasedSkia: \[String: \(url: String, checksum: String\)\] = (\[:\]|\[\n.*?\n\])\n",
+              re.DOTALL)
+          assert len(declaration.findall(text)) == 1, "Package.swift has no releasedSkia to fill in"
+          text = declaration.sub(
+              lambda _: "let releasedSkia: [String: (url: String, checksum: String)] = [\n" + entries + "]\n", text)
+
+          manifest.write_text(text)
           EOF
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
           git diff Package.swift
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git rm -r -q Dependencies
+          git rm -r -q --ignore-unmatch Dependencies
           git add Package.swift
           git commit -q -m "Release $TAG: Skia from the release's archives"
-          git tag -f "$TAG"
-          git push -f origin "refs/tags/$TAG"
+      # The manifest as a consumer evaluates it (no sibling NucleantVulkan
+      # here, so not local): it must evaluate, without unsafeFlags, and with
+      # every dependency by version, as SwiftPM requires of a package
+      # depended on by version.
+      - name: Release manifest
+        run: |
+          # As Linux, each Android ABI and wasm evaluate it (Apple's can only
+          # be evaluated on a Mac; its archive names are fixed).
+          swift package dump-package > linux.json
+          ANDROID_BUILD=1 SWIFT_ANDROID_ABI=arm64-v8a swift package dump-package > android-arm64-v8a.json
+          ANDROID_BUILD=1 SWIFT_ANDROID_ABI=x86_64 swift package dump-package > android-x86_64.json
+          WASM_BUILD=1 swift package dump-package > wasm.json
+          python3 - <<'EOF'
+          import json, os
+          base = f"https://github.com/{os.environ['GITHUB_REPOSITORY']}/releases/download/{os.environ['TAG']}/"
+          for name in ("linux", "android-arm64-v8a", "android-x86_64", "wasm"):
+              manifest = json.load(open(f"{name}.json"))
+              assert "unsafeFlags" not in json.dumps(manifest["targets"]), f"{name}: the release manifest has unsafeFlags"
+              for dependency in manifest["dependencies"]:
+                  for kind, (spec, *_) in dependency.items():
+                      requirement = spec.get("requirement", {})
+                      assert kind == "sourceControl" and ("range" in requirement or "exact" in requirement), \
+                          f"{name}: {spec.get('identity')}: not depended on by version ({kind} {requirement})"
+              # Every binary target is this release's archive: one left on
+              # Artifacts/ (an archive name with no entry) would not exist
+              # for a consumer.
+              binaries = [t for t in manifest["targets"] if t["type"] == "binary"]
+              assert binaries, f"{name}: no binary targets"
+              for target in binaries:
+                  assert (target.get("url") or "").startswith(base) and target.get("checksum"), \
+                      f"{name}: binary target {target['name']} is not on the release: {target.get('url') or target.get('path')}"
+              print(f"{name}: " + ", ".join(f"{t['name']} <- {t['url'].rsplit('/', 1)[1]}" for t in binaries))
+          EOF
+          rm *.json
+      - name: Tag and publish
+        run: |
+          # Master as the run found it: the release commit goes on top of it,
+          # so nothing is replaced or published if it moved meanwhile.
+          git fetch -q origin master
+          [ "$(git rev-parse origin/master)" = "$GITHUB_SHA" ] || {
+            echo "::error::master moved during the run: run the release again on the new master"; exit 1; }
+          # A re-release replaces the version's release and tag.
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release delete "$TAG" --yes --cleanup-tag
+          fi
+          git tag "$TAG"
+          git push --force origin "refs/tags/$TAG"
+          # A draft until every archive is up, so nobody resolves a release
+          # that is missing one.
+          gh release create "$TAG" dist/*.zip --verify-tag --draft --title "$TAG" \
+            --notes "Prebuilt Skia for every platform; SwiftPM downloads the one it builds for."
+          gh release edit "$TAG" --draft=false
+          # Master builds from this release from now on. Refused if master
+          # moved during the run: run the release again on the new master.
+          git push origin HEAD:refs/heads/master
+
+  verify:
+    needs: release
+    runs-on: ubuntu-24.04
+    container: swift:6.3.3-noble
+    steps:
+      - run: apt-get update && apt-get install -y libfontconfig1-dev
+      - name: Build a package that depends on the release
+        run: |
+          mkdir -p consumer/Sources/Consumer && cd consumer
+          cat > Package.swift <<EOF
+          // swift-tools-version: 6.2
+          import PackageDescription
+
+          let package = Package(
+              name: "Consumer",
+              platforms: [.macOS(.v14)],
+              dependencies: [
+                  .package(url: "https://github.com/$GITHUB_REPOSITORY", exact: "$TAG"),
+              ],
+              targets: [
+                  .executableTarget(name: "Consumer", dependencies: [
+                      .product(name: "NucleantSkia", package: "NucleantSkia"),
+                  ]),
+              ]
+          )
+          EOF
+          cat > Sources/Consumer/main.swift <<'EOF'
+          import NucleantSkia
+
+          print("NucleantSkia resolved and linked")
+          EOF
+          swift build
+          swift run Consumer

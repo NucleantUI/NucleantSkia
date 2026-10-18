@@ -37,6 +37,10 @@ DEV_ROOT = PACKAGE_ROOT.parent
 
 SKIA_PYTHON_DIR = DEV_ROOT / "skia-python"
 SKIA_PYTHON_REPO = "https://github.com/NucleantUI/skia-python.git"
+# The skia-python commit built from: its `skia` submodule (Skia 2708a1b1, the
+# revision build_skia_apple.py and build_skia_wasm.py build too), patches and
+# depot_tools.
+SKIA_PYTHON_REF = "7051fa5ede280643bde10bd3c125a8f2d4b9551c"
 DEPOT_TOOLS_DIR = SKIA_PYTHON_DIR / "depot_tools"
 SKIA_DIR = SKIA_PYTHON_DIR / "skia"
 PATCH_DIR = SKIA_PYTHON_DIR / "patch"
@@ -70,8 +74,15 @@ extra_cflags_cc=["-frtti"]
 
 # -lrt: on Linux clock_gettime etc. live in librt; on Android they are in libc
 # and there is no librt to link.
+#
+# expat and zlib are Skia's own (third_party/externals), inside libSkia.a, as
+# on Apple and wasm — not the build machine's, which is_official_build would
+# otherwise pick. fontconfig stays the system's: it is the machine's font
+# configuration.
 GN_ARGS_LINUX = """
 extra_ldflags=["-lrt"]
+skia_use_system_expat=false
+skia_use_system_zlib=false
 """
 
 GN_ARGS = GN_ARGS_COMMON + GN_ARGS_LINUX
@@ -100,7 +111,7 @@ def _android_gn_args(ndk: Path, target_cpu: str, api: int) -> str:
     here), so Skia would look for a *system* expat. Linux has one; Android does
     not, and SkFontMgr_android_parser needs it to read /system/etc/fonts.xml.
     Building the vendored third_party/externals/expat instead keeps the Android
-    font manager working. Left alone on Linux, where the system copy is real.
+    font manager working. (Linux builds Skia's own expat as well.)
     """
     return GN_ARGS_COMMON + f'''
 target_os="android"
@@ -144,6 +155,7 @@ def _ensure_skia_python() -> None:
     if not SKIA_PYTHON_DIR.is_dir():
         log(f"cloning skia-python into {SKIA_PYTHON_DIR} ...")
         _run(["git", "clone", SKIA_PYTHON_REPO, str(SKIA_PYTHON_DIR)])
+        _run(["git", "checkout", "-q", SKIA_PYTHON_REF], cwd=SKIA_PYTHON_DIR)
     if not (DEPOT_TOOLS_DIR / "gn").exists():
         log("initializing depot_tools submodule (git submodule update --init --depth 1 depot_tools)")
         _run(["git", "submodule", "update", "--init", "--depth", "1", "depot_tools"], cwd=SKIA_PYTHON_DIR)
