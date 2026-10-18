@@ -92,7 +92,32 @@ func prebuiltSkiaArchive() -> String {
 /// reads, because SwiftPM caches a manifest's evaluation by its text (and
 /// environment), not by the files it looks at. Empty only before the first
 /// release.
-let releasedSkia: [String: (url: String, checksum: String)] = [:]
+let releasedSkia: [String: (url: String, checksum: String)] = [
+    "Skia.xcframework.zip": (
+        url: "https://github.com/NucleantUI/NucleantSkia/releases/download/0.0.1/Skia.xcframework.zip",
+        checksum: "cafe19ab91eb269149d063373ed7d3754f9661fc7bfaf9883c44095654d49f1e"
+    ),
+    "skia-android-arm64-v8a.artifactbundle.zip": (
+        url: "https://github.com/NucleantUI/NucleantSkia/releases/download/0.0.1/skia-android-arm64-v8a.artifactbundle.zip",
+        checksum: "4dd3695a53abf20e008e7e72a316f68cb142b381484423cf77cdfaba1ce6d02f"
+    ),
+    "skia-android-x86_64.artifactbundle.zip": (
+        url: "https://github.com/NucleantUI/NucleantSkia/releases/download/0.0.1/skia-android-x86_64.artifactbundle.zip",
+        checksum: "86b838aff668e52686a246cf529fa5c857bc9ae2daefb68aac2f0828a1e78220"
+    ),
+    "skia-linux-aarch64.artifactbundle.zip": (
+        url: "https://github.com/NucleantUI/NucleantSkia/releases/download/0.0.1/skia-linux-aarch64.artifactbundle.zip",
+        checksum: "34e6f0d98e63431bb538bcbe17e9e4c38ffcd13294fc7b2e9fea7ac7e6bc128d"
+    ),
+    "skia-linux-x86_64.artifactbundle.zip": (
+        url: "https://github.com/NucleantUI/NucleantSkia/releases/download/0.0.1/skia-linux-x86_64.artifactbundle.zip",
+        checksum: "fb6e3661473b3b6bfe187a92a844dda556de3545dc4b74f65fadbfd5eeb118e1"
+    ),
+    "skia-wasm32.artifactbundle.zip": (
+        url: "https://github.com/NucleantUI/NucleantSkia/releases/download/0.0.1/skia-wasm32.artifactbundle.zip",
+        checksum: "078d67c7c33f31c4473218de3e207b39b39932eed1d60351ab826401e9103c2c"
+    ),
+]
 
 /// The prebuilt Skia, when there is one, as the "Skia" binary target:
 ///   * with NUCLEANT_SKIA_ARTIFACTS=1, Artifacts/<archive>: the archives
