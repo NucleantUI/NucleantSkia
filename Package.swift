@@ -283,7 +283,7 @@ func getDependencies() -> [Package.Dependency] {
         ]
     }
     return [
-        .package(url: "https://github.com/NucleantUI/NucleantVulkan.git", from: "0.0.1"),
+        .package(url: "https://github.com/NucleantUI/NucleantVulkan.git", .upToNextMinor(from: "0.0.1")),
     ]
 }
 
