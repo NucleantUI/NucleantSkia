@@ -150,8 +150,9 @@ extension VulkanRenderEngine {
             vkImage:          image,
             width:            width,
             height:           height,
-            format:           VK_FORMAT_R8G8B8A8_UNORM.rawValue,
-            layout:           VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL.rawValue,
+            // UInt32(...): a Vulkan enum's raw value is Int32 on Windows.
+            format:           UInt32(VK_FORMAT_R8G8B8A8_UNORM.rawValue),
+            layout:           UInt32(VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL.rawValue),
             usageFlags:       usage,
             queueFamilyIndex: queueFamilyIndex
         ) else {

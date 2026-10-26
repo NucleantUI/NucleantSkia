@@ -17,6 +17,13 @@ Prerequisites (not installed by this script):
     # either `sudo apt install python-is-python3`, or this script stages a
     # local python -> python3 symlink on PATH as a fallback.
 
+On Windows the same, natively with MSVC (Ganesh/Vulkan + DirectWrite), into
+Dependencies/windows/ (lib/*.lib, include/). Its prerequisites: Visual Studio's
+C++ tools and Windows SDK (Skia's GN finds them), ninja and patch on PATH.
+Skia's bundled ICU reads its data from an icudtl.dat beside the executable on
+Windows; patches/skia-windows-icu-data.patch links it in instead, as on every
+other platform.
+
 Usage
 -----
     python3 scripts/build_skia.py
@@ -47,6 +54,9 @@ PATCH_DIR = SKIA_PYTHON_DIR / "patch"
 OUT_DIR = SKIA_DIR / "out" / "Release"
 
 NUCLEANT_LINUX_DIR = PACKAGE_ROOT / "Dependencies" / "linux"
+NUCLEANT_WINDOWS_DIR = PACKAGE_ROOT / "Dependencies" / "windows"
+# This package's own patches to Skia (next to skia-python's in PATCH_DIR).
+NUCLEANT_PATCH_DIR = SCRIPT_DIR / "patches"
 
 LINUX_PATCHES = [
     ("0001-Make-SkPath-immutable-on-GN-build.patch", "-R"),
@@ -54,6 +64,16 @@ LINUX_PATCHES = [
     ("skia-m144-minimize-download.patch", None),
     ("skia-m132-colrv1-freetype.diff", None),
     ("skia-m132-egl-runtime.diff", None),
+]
+
+# skia-python's Windows set (scripts/build_Windows.sh) on x64, and this
+# package's ICU data patch.
+WINDOWS_PATCHES = [
+    ("0001-Make-SkPath-immutable-on-GN-build.patch", "-R"),
+    ("0001-Disable-legacy-PNG-encoding-decoding-in-SkPicture.patch", "-R"),
+    ("skia-m144-minimize-download.patch", None),
+    ("skia-m132-colrv1-freetype.diff", None),
+    (NUCLEANT_PATCH_DIR / "skia-windows-icu-data.patch", None),
 ]
 
 # Shared by every platform — same sources, same feature set. Only the bits
@@ -69,7 +89,6 @@ skia_use_system_libpng=false
 skia_use_system_icu=false
 skia_use_system_harfbuzz=false
 skia_use_system_freetype2=false
-extra_cflags_cc=["-frtti"]
 """
 
 # -lrt: on Linux clock_gettime etc. live in librt; on Android they are in libc
@@ -80,12 +99,26 @@ extra_cflags_cc=["-frtti"]
 # otherwise pick. fontconfig stays the system's: it is the machine's font
 # configuration.
 GN_ARGS_LINUX = """
+extra_cflags_cc=["-frtti"]
 extra_ldflags=["-lrt"]
 skia_use_system_expat=false
 skia_use_system_zlib=false
 """
 
 GN_ARGS = GN_ARGS_COMMON + GN_ARGS_LINUX
+
+# MSVC's flags for what -frtti is elsewhere (with skia-python's /EHsc), and the
+# DLL C runtime (/MD) for C and C++ alike: Skia names none, so cl would build
+# against the static one, which a Swift program — on the DLL one — cannot link
+# with. Fonts through DirectWrite, Skia's default on Windows; no FreeType, so
+# no skia_use_system_freetype2 either — GN warns about an argument that does
+# not exist, and Skia's header generation (gn/find_headers.py) fails on that.
+GN_ARGS_WINDOWS = GN_ARGS_COMMON.replace("skia_use_system_freetype2=false\n", "") + """
+extra_cflags=["/MD"]
+extra_cflags_cc=["/GR", "/EHsc"]
+skia_use_system_expat=false
+skia_use_system_zlib=false
+"""
 
 NUCLEANT_ANDROID_DIR = PACKAGE_ROOT / "Dependencies" / "android"
 
@@ -114,6 +147,7 @@ def _android_gn_args(ndk: Path, target_cpu: str, api: int) -> str:
     font manager working. (Linux builds Skia's own expat as well.)
     """
     return GN_ARGS_COMMON + f'''
+extra_cflags_cc=["-frtti"]
 target_os="android"
 target_cpu="{target_cpu}"
 ndk="{ndk}"
@@ -175,15 +209,16 @@ def _ensure_python_shim(bin_dir: Path) -> None:
         py.symlink_to(sys.executable)
 
 
-def _apply_patches() -> None:
-    marker = SKIA_DIR / ".nucleant_linux_patches_applied"
+def _apply_patches(patches=LINUX_PATCHES, marker_name=".nucleant_linux_patches_applied") -> None:
+    marker = SKIA_DIR / marker_name
     if marker.exists():
-        log("patches already applied (found .nucleant_linux_patches_applied) — skipping")
+        log(f"patches already applied (found {marker_name}) — skipping")
         return
-    for name, flag in LINUX_PATCHES:
+    for name, flag in patches:
         cmd = ["patch"]
         if flag:
             cmd.append(flag)
+        # A name is skia-python's; a path, this package's own.
         cmd += ["-p1", "-i", str(PATCH_DIR / name)]
         # --dry-run first: the marker is an untracked file, so anything that
         # cleans the skia checkout loses it while the tree stays patched, and a
@@ -227,7 +262,7 @@ def _ninja_build(env: dict, jobs: int | None) -> None:
 
 
 def _repackage(out_dir: Path = None, dest_dir: Path = None,
-               headers: bool = True) -> None:
+               headers: bool = True, pattern: str = "*.a") -> None:
     """Copy the built static libraries + public headers into the vendored
     Dependencies/ tree, the same way Dependencies/apple/Skia.xcframework is a
     committed binary rather than something resolved from the system.
@@ -237,9 +272,9 @@ def _repackage(out_dir: Path = None, dest_dir: Path = None,
     """
     out_dir = out_dir or OUT_DIR
     dest_dir = dest_dir or NUCLEANT_LINUX_DIR
-    archives = sorted(out_dir.glob("*.a"))
+    archives = sorted(out_dir.glob(pattern))
     if not archives:
-        sys.exit(f"ERROR: no .a files found in {out_dir} — did the ninja build finish?")
+        sys.exit(f"ERROR: no {pattern} files found in {out_dir} — did the ninja build finish?")
 
     lib_dir = dest_dir / "lib"
     include_dir = dest_dir / "include"
@@ -291,6 +326,8 @@ def main() -> int:
 
     if args.android:
         return _main_android(args)
+    if sys.platform == "win32":
+        return _main_windows(args)
 
     if not args.skip_build:
         _ensure_skia_python()
@@ -311,6 +348,35 @@ def main() -> int:
         _ninja_build(env, args.jobs)
 
     _repackage()
+    log("done")
+    return 0
+
+
+def _main_windows(args) -> int:
+    """Build Skia natively with MSVC and vendor it into
+    Dependencies/windows/{lib,include}, the layout of Dependencies/linux/."""
+    out_dir = SKIA_DIR / "out" / "Windows-x64"
+    if not args.skip_build:
+        _ensure_skia_python()
+        # Skia's own gn.exe (git-sync-deps fetches it into skia/bin) and the
+        # ninja on PATH — not depot_tools' gn.bat/ninja.bat, which bootstrap a
+        # toolchain of their own first. No python shim: Windows has python.
+        env = {**os.environ, "PATH": f"{SKIA_DIR / 'bin'}{os.pathsep}{os.environ.get('PATH', '')}"}
+
+        _apply_patches(WINDOWS_PATCHES, ".nucleant_windows_patches_applied")
+        _sync_deps(env)
+
+        if args.clean and out_dir.exists():
+            log(f"cleaning {out_dir}")
+            shutil.rmtree(out_dir)
+        if args.clean or not (out_dir / "build.ninja").exists():
+            # By path: Windows looks a bare name up on this process's PATH,
+            # not env's.
+            _run([str(SKIA_DIR / "bin" / "gn.exe"), "gen", str(out_dir), f"--args={GN_ARGS_WINDOWS}"],
+                 cwd=SKIA_DIR, env=env)
+        _ninja_build_dir(out_dir, env, args.jobs)
+
+    _repackage(out_dir, NUCLEANT_WINDOWS_DIR, pattern="*.lib")
     log("done")
     return 0
 

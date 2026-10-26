@@ -31,6 +31,9 @@
 // instead (which is why the Android Skia build needs expat).
 #include "include/ports/SkFontMgr_android.h"
 #include "include/ports/SkFontScanner_FreeType.h"
+#elif defined(_WIN32)
+// DirectWrite: the system's fonts and its rasterizer.
+#include "include/ports/SkTypeface_win.h"
 #else
 #include "include/ports/SkFontMgr_fontconfig.h"
 #include "include/ports/SkFontScanner_FreeType.h"
@@ -329,6 +332,8 @@ static sk_sp<SkTypeface> default_typeface() {
 #elif defined(__ANDROID__)
         // NULL custom fonts == system fonts only.
         sk_sp<SkFontMgr> mgr = SkFontMgr_New_Android(nullptr, SkFontScanner_Make_FreeType());
+#elif defined(_WIN32)
+        sk_sp<SkFontMgr> mgr = SkFontMgr_New_DirectWrite();
 #else
         sk_sp<SkFontMgr> mgr = SkFontMgr_New_FontConfig(nullptr, SkFontScanner_Make_FreeType());
 #endif

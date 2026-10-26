@@ -5,7 +5,7 @@ import Foundation
 import PackageDescription
 
 /// Build against the sibling `../NucleantVulkan` checkout or its
-/// release on GitHub (from 0.0.1).
+/// release on GitHub (from 0.0.2, the first with Windows).
 ///
 /// GitHub unless `NUCLEANT_LOCAL_DEV=1` is in the environment: the sibling
 /// checkouts are used only when that turns them on, never just because they
@@ -33,6 +33,10 @@ func getPlatformTarget() -> PackageDescription.Platform {
     }
 #if os(Linux)
     return .linux
+#elseif os(Windows)
+    // Native, like Linux: the Windows toolchain builds for the machine it
+    // runs on.
+    return .windows
 #else
     return .macOS
 #endif
@@ -58,7 +62,7 @@ func androidABI() -> String {
 
 /// Skia prebuilt as one archive per platform: `Skia.xcframework.zip` on
 /// Apple's platforms, a static-library artifact bundle (SE-0482) on the
-/// others — see scripts/make_artifactbundle.py. This is its file name, the
+/// others (Skia.lib on Windows) — see scripts/make_artifactbundle.py. This is its file name, the
 /// same on a GitHub release and under Artifacts/.
 func prebuiltSkiaArchive() -> String {
     switch platformTarget {
@@ -66,6 +70,13 @@ func prebuiltSkiaArchive() -> String {
         return "skia-wasm32.artifactbundle.zip"
     case .android:
         return "skia-android-\(androidABI()).artifactbundle.zip"
+    case .windows:
+        // Native, as on Linux.
+#if arch(arm64)
+        return "skia-windows-arm64.artifactbundle.zip"
+#else
+        return "skia-windows-x86_64.artifactbundle.zip"
+#endif
     case .linux:
         // Linux builds are native, so the host's architecture is the target's.
 #if arch(arm64)
@@ -244,6 +255,37 @@ func prebuiltSkiaTargets(_ skia: Target) -> [Target] {
                 ]
             ),
         ]
+    case .windows:
+        return [
+            skia,
+            .target(
+                name: "CSkia",
+                dependencies: ["Skia"],
+                path: "Sources/CSkia",
+                sources: ["cskia.cpp", "cskia_api.cpp"],
+                publicHeadersPath: "include",
+                cxxSettings: [
+                    .headerSearchPath("."),
+                    .define("SK_GANESH"),
+                    .define("SK_VULKAN"),
+                    .define("SK_USE_INTERNAL_VULKAN_HEADERS"),
+                    .define("CSKIA_SVG"),
+                    .headerSearchPath("skia"),
+                ],
+                linkerSettings: [
+                    // The system libraries Skia.lib calls into, beyond the C
+                    // runtime and kernel32: COM (WIC image decoding), GDI
+                    // (typefaces from a LOGFONT, font data), user32 (font
+                    // smoothing settings) and the registry (ICU's time zones).
+                    // DirectWrite is loaded at run time; everything else,
+                    // ICU's data too, is inside Skia.lib.
+                    .linkedLibrary("ole32"),
+                    .linkedLibrary("gdi32"),
+                    .linkedLibrary("user32"),
+                    .linkedLibrary("advapi32"),
+                ]
+            ),
+        ]
     default:
         return [
             skia,
@@ -276,7 +318,8 @@ func getDependencies() -> [Package.Dependency] {
         ]
     }
     return [
-        .package(url: "https://github.com/NucleantUI/NucleantVulkan.git", .upToNextMinor(from: "0.0.1")),
+        // 0.0.2: the first with Windows.
+        .package(url: "https://github.com/NucleantUI/NucleantVulkan.git", .upToNextMinor(from: "0.0.2")),
     ]
 }
 

@@ -47,6 +47,8 @@
 #elif defined(__wasm__)
 // The browser: no system fonts, faces only from files and data.
 #include "include/ports/SkFontMgr_empty.h"
+#elif defined(_WIN32)
+#include "include/ports/SkTypeface_win.h"
 #else
 #include "include/ports/SkFontMgr_fontconfig.h"
 #include "include/ports/SkFontScanner_FreeType.h"
@@ -205,6 +207,8 @@ static sk_sp<SkFontMgr> font_mgr() {
         return SkFontMgr_New_Android(nullptr, SkFontScanner_Make_FreeType());
 #elif defined(__wasm__)
         return SkFontMgr_New_Custom_Empty();
+#elif defined(_WIN32)
+        return SkFontMgr_New_DirectWrite();
 #else
         return SkFontMgr_New_FontConfig(nullptr, SkFontScanner_Make_FreeType());
 #endif

@@ -4,7 +4,8 @@
 #
 #   apple    Skia.xcframework.zip                       macOS + iOS + simulator
 #   linux    skia-linux-x86_64.artifactbundle.zip       \
-#            skia-linux-aarch64.artifactbundle.zip       |  static-library
+#            skia-linux-aarch64.artifactbundle.zip       |
+#   windows  skia-windows-x86_64.artifactbundle.zip      |  static-library
 #   android  skia-android-arm64-v8a.artifactbundle.zip   |  artifact bundles
 #            skia-android-x86_64.artifactbundle.zip      |  (SE-0482)
 #   wasm     skia-wasm32.artifactbundle.zip             /
@@ -24,7 +25,7 @@ on:
       platform:
         description: Platform to build (all, or one to retry)
         type: choice
-        options: [all, apple, linux, android, wasm]
+        options: [all, apple, linux, windows, android, wasm]
         default: all
   workflow_call:
     inputs:
@@ -160,6 +161,89 @@ jobs:
           name: skia-linux-${{ matrix.arch }}
           path: Artifacts
       - name: Test against it, ${{ matrix.arch }}
+        run: swift test
+
+  windows:
+    name: windows (x86_64)
+    # Native, with MSVC: Skia's GN finds Visual Studio itself. x86_64 only,
+    # for now. Bash, for the patches build_skia.py applies to Skia.
+    if: inputs.platform == '' || inputs.platform == 'all' || inputs.platform == 'windows'
+    runs-on: windows-2025
+    timeout-minutes: 360
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7
+      # Python 3.13 through uv, as python and python3 (Skia's GN runs
+      # python3), and ninja.
+      - uses: astral-sh/setup-uv@v8
+      - name: Python 3.13 and ninja
+        run: |
+          uv python install 3.13 --default --preview-features python-install-default
+          uv tool install ninja
+          uv python dir --bin >> "$GITHUB_PATH"
+          uv tool dir --bin >> "$GITHUB_PATH"
+      - name: skia-python
+        run: |
+          # Skia's sources as they are, for its patches (no CRLF), and its
+          # deepest paths.
+          git config --global core.autocrlf false
+          git config --global core.longpaths true
+          # At the commit build_skia.py builds from (SKIA_PYTHON_REF): its
+          # skia submodule is the Skia every platform builds.
+          ref=$(sed -n 's/^SKIA_PYTHON_REF = "\(.*\)"$/\1/p' scripts/build_skia.py)
+          git init -q ../skia-python
+          git -C ../skia-python fetch -q --depth 1 https://github.com/NucleantUI/skia-python.git "$ref"
+          git -C ../skia-python checkout -q FETCH_HEAD
+          git -C ../skia-python submodule update --init --depth 1 depot_tools skia
+      - name: Build Skia x86_64
+        run: python scripts/build_skia.py
+      - name: Package x86_64
+        run: >
+          python scripts/make_artifactbundle.py
+          --lib-dir Dependencies/windows/lib --include Dependencies/windows/include
+          --triple x86_64-unknown-windows-msvc
+          --name skia-windows-x86_64 --output dist --version "$VERSION"
+          --ar "C:/Program Files/LLVM/bin/llvm-lib.exe"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: skia-windows-x86_64
+          path: dist/skia-windows-x86_64.artifactbundle.zip
+
+  windows-test:
+    name: windows test (x86_64)
+    needs: windows
+    # A fresh machine with nothing but Swift: the bundle and NucleantVulkan's
+    # release have to build and run the tests. It has no GPU, so Mesa's
+    # software Vulkan driver (lavapipe) is the one the loader finds — for
+    # Skia drawing on the engine's device
+    # (Tests/NucleantSkiaTests/SkiaWin32Tests.swift).
+    runs-on: windows-2025
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          name: skia-windows-x86_64
+          path: Artifacts
+      - uses: compnerd/gha-setup-swift@v0.5.1
+        with:
+          swift-version: swift-${{ env.SWIFT_VERSION }}-release
+          swift-build: ${{ env.SWIFT_VERSION }}-RELEASE
+      - name: lavapipe
+        run: |
+          $version = "26.2.4"
+          curl.exe -fsSL -o mesa.7z "https://github.com/pal1000/mesa-dist-win/releases/download/$version/mesa3d-$version-release-msvc.7z"
+          7z x mesa.7z -omesa x64/vulkan_lvp.dll x64/lvp_icd.x86_64.json -r | Out-Null
+          $icd = (Resolve-Path mesa/x64/lvp_icd.x86_64.json).Path
+          Get-Content $icd
+          # Registered the way an installed driver is: the loader ignores
+          # VK_DRIVER_FILES in an elevated process, which the runner's are.
+          $drivers = "HKLM:\SOFTWARE\Khronos\Vulkan\Drivers"
+          New-Item -Path $drivers -Force | Out-Null
+          New-ItemProperty -Path $drivers -Name $icd -PropertyType DWord -Value 0 -Force | Out-Null
+      - name: Test against it, x86_64
         run: swift test
 
   android:
