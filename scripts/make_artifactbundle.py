@@ -7,8 +7,8 @@
             lib/libSkia.a                every archive of the build, merged
             include/...                  Skia's headers, as the build laid them out
 
-for a `.binaryTarget(name: "Skia", url:/path:, ...)` on Linux, Android and
-WebAssembly, the way Skia.xcframework is one on Apple's platforms. The bundle
+for a `.binaryTarget(name: "Skia", url:/path:, ...)` on Linux, Windows,
+Android and WebAssembly, the way Skia.xcframework is one on Apple's platforms. The bundle
 is one platform and architecture, so a package downloads only the Skia it
 builds with.
 
@@ -25,6 +25,10 @@ only unsafeFlags can pass.
 --header-path (repeatable, relative to the bundle's include/) adds a header
 search path below include/ (wasm: dawn-headers). --ar names the archiver;
 it must understand MRI scripts (llvm-ar, GNU ar — not macOS's ar).
+
+On Windows the build's archives are .lib files, merged into lib/Skia.lib
+(which SwiftPM links as -lSkia) by a librarian instead: --ar names llvm-lib
+or MSVC's lib, by default whichever is on PATH.
 """
 
 from __future__ import annotations
@@ -56,9 +60,16 @@ def merge_archives(ar: str, archives: list[Path], output: Path) -> None:
     subprocess.run([ar, "s", str(output)], check=True)
 
 
+def merge_libs(lib: str, archives: list[Path], output: Path) -> None:
+    """Windows: all `archives` into `output`, as the librarian takes .lib
+    inputs — every member of each."""
+    log(f"merging {len(archives)} libraries -> {output.name}")
+    subprocess.run([lib, "/NOLOGO", f"/OUT:{output}", *map(str, archives)], check=True)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--lib-dir", type=Path, required=True, help="directory of the build's .a archives")
+    parser.add_argument("--lib-dir", type=Path, required=True, help="directory of the build's .a (Windows: .lib) archives")
     parser.add_argument("--include", type=Path, required=True, help="the build's header tree (include/, modules/, ...)")
     parser.add_argument("--header-path", action="append", default=[],
                         help="extra header search path, relative to the bundle's include/")
@@ -66,12 +77,22 @@ def main() -> int:
     parser.add_argument("--name", required=True, help="file name of the zip, without .artifactbundle.zip")
     parser.add_argument("--output", type=Path, required=True, help="directory the zip is written to")
     parser.add_argument("--version", default="1.0.0", help="the artifact's version in info.json")
-    parser.add_argument("--ar", default=shutil.which("llvm-ar") or "ar", help="MRI-capable archiver")
+    parser.add_argument("--ar", default=None,
+                        help="MRI-capable archiver (Windows: llvm-lib or lib)")
     args = parser.parse_args()
 
     archives = sorted(args.lib_dir.glob("*.a"))
+    windows = not archives
+    if windows:
+        archives = sorted(args.lib_dir.glob("*.lib"))
     if not archives:
-        sys.exit(f"error: no .a archives in {args.lib_dir}")
+        sys.exit(f"error: no .a or .lib archives in {args.lib_dir}")
+    if windows:
+        ar = args.ar or shutil.which("llvm-lib") or "lib"
+        library = f"{ARTIFACT}.lib"
+    else:
+        ar = args.ar or shutil.which("llvm-ar") or "ar"
+        library = f"lib{ARTIFACT}.a"
     if not args.include.is_dir():
         sys.exit(f"error: no header directory {args.include}")
 
@@ -79,7 +100,8 @@ def main() -> int:
     with tempfile.TemporaryDirectory() as temp:
         bundle = Path(temp) / f"{ARTIFACT}.artifactbundle"
         (bundle / "lib").mkdir(parents=True)
-        merge_archives(args.ar, [a.resolve() for a in archives], (bundle / "lib" / f"lib{ARTIFACT}.a").resolve())
+        merge = merge_libs if windows else merge_archives
+        merge(ar, [a.resolve() for a in archives], (bundle / "lib" / library).resolve())
         shutil.copytree(args.include, bundle / "include")
         info = {
             "schemaVersion": "1.0",
@@ -88,7 +110,7 @@ def main() -> int:
                     "type": "staticLibrary",
                     "version": args.version,
                     "variants": [{
-                        "path": f"lib/lib{ARTIFACT}.a",
+                        "path": f"lib/{library}",
                         "supportedTriples": args.triple,
                         "staticLibraryMetadata": {
                             "headerPaths": ["include", *(f"include/{p}" for p in args.header_path)],

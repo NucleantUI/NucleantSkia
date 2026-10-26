@@ -11,7 +11,6 @@
 #if os(WASI)
 import Foundation
 import Testing
-import Observation
 import CVulkan
 import NucleantVulkan
 @testable import NucleantSkia
@@ -152,19 +151,6 @@ struct SkiaWebGPUTests {
 
 // MARK: - Helpers
 
-private func pixel(_ pixels: [UInt8], _ width: Int, _ x: Int, _ y: Int) -> [UInt8] {
-    let i = (y * width + x) * 4
-    return Array(pixels[i..<i + 4])
-}
-
-private func expectPixel(
-    _ pixels: [UInt8], _ width: Int, _ x: Int, _ y: Int, _ expected: [UInt8], sourceLocation: SourceLocation = #_sourceLocation
-) {
-    let actual = pixel(pixels, width, x, y)
-    let close = zip(actual, expected).allSatisfy { abs(Int($0) - Int($1)) <= 1 }
-    #expect(close, "pixel \(x),\(y): \(actual), expected \(expected)", sourceLocation: sourceLocation)
-}
-
 /// `image`'s texels through a host-visible buffer on the engine's device.
 private func readPixels(_ engine: VulkanRenderEngine<SkiaSlot>, _ image: VkImage, width: Int, height: Int) -> [UInt8] {
     let byteCount = width * height * 4
@@ -215,39 +201,5 @@ private func readPixels(_ engine: VulkanRenderEngine<SkiaSlot>, _ image: VkImage
     }
     vkUnmapMemory(engine.device, memory)
     return out
-}
-
-/// The smallest composite slot the engine can drive: one Skia node.
-@Observable
-final class SkiaSlot: RenderContainerNode, @unchecked Sendable {
-    enum Context: RenderNodeContext {
-        case skia(SkiaShaderNode<SkiaSlot>)
-    }
-
-    let id: Int
-    let context: Context
-    var needsRender = true
-
-    init(id: Int, context: Context) {
-        self.id = id
-        self.context = context
-    }
-
-    func observeContext() {
-        if case .skia(let node) = context { observe(node) }
-    }
-
-    func update(engine: Engine, cmd: VkCommandBuffer) {
-        if case .skia(let node) = context { node.update(engine, slot: self, cmd: cmd) }
-    }
-
-    func destroyResources(engine: Engine) {
-        if case .skia(let node) = context { node.destroyResources(engine) }
-    }
-
-    func getImageView() -> VkImageView? {
-        if case .skia(let node) = context { return node.imageView }
-        return nil
-    }
 }
 #endif

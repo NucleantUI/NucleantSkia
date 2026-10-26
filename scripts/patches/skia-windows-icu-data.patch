@@ -1,0 +1,64 @@
+--- a/third_party/icu/BUILD.gn
++++ b/third_party/icu/BUILD.gn
+@@ -13,7 +13,7 @@
+     defines = [ "U_USING_ICU_NAMESPACE=0" ]
+   }
+ } else {
+-  if (target_cpu == "wasm") {
++  if (target_cpu == "wasm" || is_win) {
+     data_assembly = "$target_gen_dir/icudtl_dat.cpp"
+   } else {
+     data_assembly = "$target_gen_dir/icudtl_dat.S"
+@@ -31,7 +31,7 @@
+     data_dir += "common"
+   }
+   action("make_data_assembly") {
+-    if (target_cpu == "wasm") {
++    if (target_cpu == "wasm" || is_win) {
+       _u_icu_version_major_num =
+           "74"  # defined in source/common/unicode/uvernum.h
+       script = "make_data_cpp.py"
+@@ -95,16 +95,16 @@
+     }
+     sources = icu_sources
+     if (is_win) {
+-      deps = [ ":icudata" ]
++      # The data linked in, as on every other platform, instead of
++      # icudtl.dat loaded from beside the executable (SkLoadICU.cpp).
++      deps = [ ":make_data_assembly" ]
+       public_defines += [
+         "U_NOEXCEPT=",
+         "U_STATIC_IMPLEMENTATION",
++        "SK_ICU_DATA_LINKED",
+       ]
+       libs = [ "Advapi32.lib" ]
+-      sources += [
+-        "../externals/icu/source/stubdata/stubdata.cpp",
+-        "SkLoadICU.cpp",
+-      ]
++      sources += [ "$data_assembly" ]
+     } else {
+       sources += [ "$data_assembly" ]
+       deps = [ ":make_data_assembly" ]
+--- a/third_party/icu/SkLoadICU.h
++++ b/third_party/icu/SkLoadICU.h
+@@ -7,7 +7,7 @@
+ #ifndef load_icu_DEFINED
+ #define load_icu_DEFINED
+ 
+-#if defined(_WIN32) && defined(SK_USING_THIRD_PARTY_ICU)
++#if defined(_WIN32) && defined(SK_USING_THIRD_PARTY_ICU) && !defined(SK_ICU_DATA_LINKED)
+ bool SkLoadICU();
+ #else
+ static inline bool SkLoadICU() { return true; }
+--- a/third_party/icu/make_data_cpp.py
++++ b/third_party/icu/make_data_cpp.py
+@@ -42,7 +42,7 @@
+         o.write(footer.format(name))
+ 
+ 
+-cpp = ('#include <cstdint>\nextern "C" uint32_t {0}[] __attribute__((aligned(16))) = {{\n',
++cpp = ('#include <cstdint>\nextern "C" alignas(16) uint32_t {0}[] = {{\n',
+        '', ',', '}};\n')
+ 
+ if __name__ == '__main__':

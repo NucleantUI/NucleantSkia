@@ -88,9 +88,10 @@ extension SkiaShaderNode {
         // The engine's barriers moved the image since Skia's last flush —
         // hand Skia the layout the image is *really* in, then flush with
         // an explicit final state matching what the barrier below assumes.
-        surface.notifyLayout(currentLayout.rawValue)
+        // UInt32(...): a Vulkan enum's raw value is Int32 on Windows.
+        surface.notifyLayout(UInt32(currentLayout.rawValue))
         let flushed = surface.flush(
-            finalLayout: VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL.rawValue,
+            finalLayout: UInt32(VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL.rawValue),
             syncCpu:     false
         )
         guard flushed else {
