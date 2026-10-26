@@ -4,23 +4,16 @@
 import Foundation
 import PackageDescription
 
-/// Build against the sibling `../NucleantVulkan` checkout or against its
-/// release on GitHub (from 0.0.1) — decided the same way in every Nucleant
-/// package: `NUCLEANT_LOCAL_DEV=1|0` in the environment wins; otherwise local
-/// when the sibling checkout exists next to this package. (A package fetched
-/// by version may not have path dependencies, so a clone SwiftPM made under
-/// `.build/checkouts` has to take the GitHub one.)
-let devMode: Bool = {
-    if let flag = ProcessInfo.processInfo.environment["NUCLEANT_LOCAL_DEV"] {
-        return ["1", "true", "yes"].contains(flag.lowercased())
-    }
-    let siblings = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
-    // Never in a `checkouts` directory (SwiftPM's, Xcode's): there the
-    // "sibling" is the consumer's own checkout of NucleantVulkan, and taking
-    // it as a path dependency leaves the graph unresolvable.
-    return siblings.lastPathComponent != "checkouts"
-        && FileManager.default.fileExists(atPath: siblings.appendingPathComponent("NucleantVulkan").path)
-}()
+/// Build against the sibling `../NucleantVulkan` checkout or its
+/// release on GitHub (from 0.0.1).
+///
+/// GitHub unless `NUCLEANT_LOCAL_DEV=1` is in the environment: the sibling
+/// checkouts are used only when that turns them on, never just because they
+/// are there. Every Nucleant package reads the same variable, so one setting
+/// covers the whole chain.
+let devMode: Bool = ["1", "true", "yes"].contains(
+    (ProcessInfo.processInfo.environment["NUCLEANT_LOCAL_DEV"] ?? "").lowercased()
+)
 
 func getPlatformTarget() -> PackageDescription.Platform {
     // Package.swift is compiled by the *host* toolchain even when
