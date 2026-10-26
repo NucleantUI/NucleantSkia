@@ -177,7 +177,11 @@ jobs:
       - uses: actions/checkout@v7
       # Python 3.13 through uv, as python and python3 (Skia's GN runs
       # python3), and ninja.
-      - uses: astral-sh/setup-uv@v8
+      # setup-uv has no major-version tags: an exact release. Nothing here
+      # for its cache (no uv.lock), so none.
+      - uses: astral-sh/setup-uv@v10.3.0
+        with:
+          enable-cache: false
       - name: Python 3.13 and ninja
         run: |
           uv python install 3.13 --default --preview-features python-install-default
