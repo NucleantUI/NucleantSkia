@@ -113,9 +113,13 @@ GN_ARGS = GN_ARGS_COMMON + GN_ARGS_LINUX
 # with. Fonts through DirectWrite, Skia's default on Windows; no FreeType, so
 # no skia_use_system_freetype2 either — GN warns about an argument that does
 # not exist, and Skia's header generation (gn/find_headers.py) fails on that.
+# _USE_STD_VECTOR_ALGORITHMS=0: the STL's plain std::min_element and the like,
+# not its vectorized helpers (__std_max_element_1u, …), whose set grows with
+# each MSVC release — built with the newest, the library would only link with
+# that same Visual Studio.
 GN_ARGS_WINDOWS = GN_ARGS_COMMON.replace("skia_use_system_freetype2=false\n", "") + """
 extra_cflags=["/MD"]
-extra_cflags_cc=["/GR", "/EHsc"]
+extra_cflags_cc=["/GR", "/EHsc", "/D_USE_STD_VECTOR_ALGORITHMS=0"]
 skia_use_system_expat=false
 skia_use_system_zlib=false
 """
