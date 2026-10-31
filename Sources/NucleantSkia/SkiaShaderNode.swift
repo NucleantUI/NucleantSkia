@@ -23,7 +23,7 @@ import Observation
 @Observable
 public final class SkiaShaderNode<ContainerNode: RenderContainerNode>: VulkanSkiaRenderNode {
     
-    public typealias Engine = VulkanRenderEngine<ContainerNode>
+    public typealias Device = VulkanRenderDevice<ContainerNode>
     
     public var canvas: SkiaVulkanCanvas
     // Mutable so `resizeSkiaNode` can swap a new backing in place while the
@@ -80,7 +80,7 @@ public final class SkiaShaderNode<ContainerNode: RenderContainerNode>: VulkanSki
 }
 
 extension SkiaShaderNode {
-    public func update(_ engine: Engine, slot: ContainerNode, cmd: VkCommandBuffer) {
+    public func update(_ device: Device, slot: ContainerNode, cmd: VkCommandBuffer) {
         let id = slot.id
         guard slot.needsRender else { return }
         guard let surface = canvas.surface else { return }
@@ -95,7 +95,7 @@ extension SkiaShaderNode {
             syncCpu:     false
         )
         guard flushed else {
-            if engine.warnedFailedNodes.insert(id).inserted {
+            if device.warnedFailedNodes.insert(id).inserted {
                 print("VulkanRenderEngine: skia node \(id) flush/submit failed — logged once")
             }
             return
@@ -145,22 +145,25 @@ extension SkiaShaderNode {
             )
         }
         currentLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
-        engine.readable.insert(id)
+        device.readable.insert(id)
         // slot.needsRender deliberately not cleared — same steady-state as
         // the other node updates until the canvas side drives updates
         // through the Observation chain.
     }
 
-    /// Free the GPU resources this node owns after draining the device —
-    /// the Skia surface first, since it holds Ganesh's views onto the
-    /// image, then the image/view/memory.
-    public func destroyResources(_ engine: Engine) {
-        vkDeviceWaitIdle(engine.device)
+    /// Free the GPU resources this node owns — the Skia surface first, since
+    /// it holds Ganesh's views onto the image, then the image/view/memory
+    /// once the work in flight, in any window, is done with them.
+    public func destroyResources(_ device: Device) {
         canvas.dropSurface()
-        vkDestroyImageView(engine.device, imageView, nil)
-        vkDestroyImage(engine.device, image, nil)
-        if let memory {
-            vkFreeMemory(engine.device, memory, nil)
+        let vkDevice = device.device
+        let imageView = imageView, image = image, memory = memory
+        device.releaseAfterInFlightWork {
+            vkDestroyImageView(vkDevice, imageView, nil)
+            vkDestroyImage(vkDevice, image, nil)
+            if let memory {
+                vkFreeMemory(vkDevice, memory, nil)
+            }
         }
     }
 }

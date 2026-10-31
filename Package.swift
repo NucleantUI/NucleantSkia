@@ -322,8 +322,8 @@ func getDependencies() -> [Package.Dependency] {
         ]
     }
     return [
-        // 0.0.2: the first with Windows.
-        .package(url: "https://github.com/NucleantUI/NucleantVulkan.git", .upToNextMinor(from: "0.0.2")),
+        // 0.1.0: the shared VulkanRenderDevice the nodes take.
+        .package(url: "https://github.com/NucleantUI/NucleantVulkan.git", .upToNextMajor(from: "0.1.0")),
     ]
 }
 
