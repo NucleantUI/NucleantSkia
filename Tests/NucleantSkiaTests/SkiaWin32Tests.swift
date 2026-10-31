@@ -44,9 +44,9 @@ struct SkiaWin32Tests {
 
     @Test func widgetNodeHoldsWhatSkiaDrew() throws {
         let engine = try makeEngine()
-        let context = try engine.makeSkiaContext()
-        let node = try #require(engine.makeSkiaWidgetNode(context: context, width: 32, height: 16))
-        defer { node.destroyResources(engine) }
+        let context = try engine.renderDevice.makeSkiaContext()
+        let node = try #require(engine.renderDevice.makeSkiaWidgetNode(context: context, width: 32, height: 16))
+        defer { node.destroyResources(engine.renderDevice) }
         let surface = try #require(node.canvas.surface)
         let canvas = try #require(surface.canvas)
 
@@ -63,9 +63,9 @@ struct SkiaWin32Tests {
 
     @Test func pathsAndAntialiasedShapes() throws {
         let engine = try makeEngine()
-        let context = try engine.makeSkiaContext()
-        let node = try #require(engine.makeSkiaWidgetNode(context: context, width: 64, height: 64))
-        defer { node.destroyResources(engine) }
+        let context = try engine.renderDevice.makeSkiaContext()
+        let node = try #require(engine.renderDevice.makeSkiaWidgetNode(context: context, width: 64, height: 64))
+        defer { node.destroyResources(engine.renderDevice) }
         let surface = try #require(node.canvas.surface)
         let canvas = try #require(surface.canvas)
 
@@ -90,9 +90,9 @@ struct SkiaWin32Tests {
 
     @Test func textFromAFontFileAndAnUploadedImage() throws {
         let engine = try makeEngine()
-        let context = try engine.makeSkiaContext()
-        let node = try #require(engine.makeSkiaWidgetNode(context: context, width: 120, height: 40))
-        defer { node.destroyResources(engine) }
+        let context = try engine.renderDevice.makeSkiaContext()
+        let node = try #require(engine.renderDevice.makeSkiaWidgetNode(context: context, width: 120, height: 40))
+        defer { node.destroyResources(engine.renderDevice) }
         let surface = try #require(node.canvas.surface)
         let canvas = try #require(surface.canvas)
 
@@ -119,9 +119,9 @@ struct SkiaWin32Tests {
 
     @Test func redrawAfterAFlushReplacesTheContent() throws {
         let engine = try makeEngine()
-        let context = try engine.makeSkiaContext()
-        let node = try #require(engine.makeSkiaWidgetNode(context: context, width: 16, height: 16))
-        defer { node.destroyResources(engine) }
+        let context = try engine.renderDevice.makeSkiaContext()
+        let node = try #require(engine.renderDevice.makeSkiaWidgetNode(context: context, width: 16, height: 16))
+        defer { node.destroyResources(engine.renderDevice) }
         let surface = try #require(node.canvas.surface)
         let canvas = try #require(surface.canvas)
 
@@ -135,12 +135,12 @@ struct SkiaWin32Tests {
 
     @Test func resizedNodeDrawsAtTheNewSize() throws {
         let engine = try makeEngine()
-        let context = try engine.makeSkiaContext()
-        let node = try #require(engine.makeSkiaWidgetNode(context: context, width: 8, height: 8))
-        defer { node.destroyResources(engine) }
+        let context = try engine.renderDevice.makeSkiaContext()
+        let node = try #require(engine.renderDevice.makeSkiaWidgetNode(context: context, width: 8, height: 8))
+        defer { node.destroyResources(engine.renderDevice) }
         let oldImage = node.image
 
-        #expect(engine.resizeSkiaNode(node, id: 1, width: 24, height: 12))
+        #expect(engine.renderDevice.resizeSkiaNode(node, id: 1, width: 24, height: 12))
         #expect(node.width == 24)
         #expect(node.height == 12)
         #expect(node.image != oldImage)
@@ -157,8 +157,8 @@ struct SkiaWin32Tests {
 
     @Test func engineCompositesASkiaNode() throws {
         let engine = try makeEngine()
-        let context = try engine.makeSkiaContext()
-        let node = try #require(engine.makeSkiaWidgetNode(context: context, width: 32, height: 24))
+        let context = try engine.renderDevice.makeSkiaContext()
+        let node = try #require(engine.renderDevice.makeSkiaWidgetNode(context: context, width: 32, height: 24))
         let canvas = try #require(node.canvas.surface?.canvas)
         canvas.clear(SIMD4<Float>(1, 0.5, 0, 1))
 
@@ -166,11 +166,12 @@ struct SkiaWin32Tests {
         // The node's update flushes Skia's drawing, then the frame samples it.
         engine.drawFrame(1.0 / 60.0)
         engine.waitForPreviousFrame()
-        #expect(engine.readable.contains(1))
+        #expect(engine.renderDevice.readable.contains(1))
         let pixels = readPixels(engine, node)
         expectPixel(pixels, 32, 16, 12, [255, 128, 0, 255])
-        // The slot frees the node (and its surface) on removal.
+        // The window only shows the node; its maker frees it (and its surface).
         engine.remove(id: 1)
+        node.destroyResources(engine.renderDevice)
     }
 }
 
@@ -218,7 +219,7 @@ private func readPixels(_ engine: VulkanRenderEngine<SkiaSlot>, _ node: SkiaShad
     let image = node.image
     let layout = node.currentLayout
     let anyAccess = VkAccessFlags(VK_ACCESS_MEMORY_READ_BIT.rawValue) | VkAccessFlags(VK_ACCESS_MEMORY_WRITE_BIT.rawValue)
-    engine.oneTimeSubmit { cmd in
+    engine.renderDevice.oneTimeSubmit { cmd in
         engineImageBarrier(
             cmd, image: image,
             srcLayout: layout, srcAccess: anyAccess, srcStage: VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
