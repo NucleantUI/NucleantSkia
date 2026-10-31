@@ -98,32 +98,32 @@ func prebuiltSkiaArchive() -> String {
 /// release.
 let releasedSkia: [String: (url: String, checksum: String)] = [
     "Skia.xcframework.zip": (
-        url: "https://github.com/NucleantUI/NucleantSkia/releases/download/0.0.2/Skia.xcframework.zip",
-        checksum: "ef899cb5fe728c33adb2fbd6059bb5d7ee5d09211ee8837c6bdcc240a91da212"
+        url: "https://github.com/NucleantUI/NucleantSkia/releases/download/0.1.0/Skia.xcframework.zip",
+        checksum: "71492dadb431b1346b82d8103c5137c14a3001f6a512db90cbb81341e5038641"
     ),
     "skia-android-arm64-v8a.artifactbundle.zip": (
-        url: "https://github.com/NucleantUI/NucleantSkia/releases/download/0.0.2/skia-android-arm64-v8a.artifactbundle.zip",
-        checksum: "00d09426cf72888ef6db8ac76ad2aecc384437a2296bee960ee473084a6ea9d3"
+        url: "https://github.com/NucleantUI/NucleantSkia/releases/download/0.1.0/skia-android-arm64-v8a.artifactbundle.zip",
+        checksum: "24a463a908a0839c218e2d51b6dfd1e40becbf50701f7b2a1cc00b75487e24d5"
     ),
     "skia-android-x86_64.artifactbundle.zip": (
-        url: "https://github.com/NucleantUI/NucleantSkia/releases/download/0.0.2/skia-android-x86_64.artifactbundle.zip",
-        checksum: "faa53986f6f1b6b9cae0de8b39685998f49aacf13c432e9667cd41652d8e46e3"
+        url: "https://github.com/NucleantUI/NucleantSkia/releases/download/0.1.0/skia-android-x86_64.artifactbundle.zip",
+        checksum: "d10d09d6fdefdde9bd3255abca706c095d3e3311c348ccace5148dceb42201ac"
     ),
     "skia-linux-aarch64.artifactbundle.zip": (
-        url: "https://github.com/NucleantUI/NucleantSkia/releases/download/0.0.2/skia-linux-aarch64.artifactbundle.zip",
-        checksum: "8279b81e82419fdbda4d4b3c179968ec54060707d828b51da3549c28905f1892"
+        url: "https://github.com/NucleantUI/NucleantSkia/releases/download/0.1.0/skia-linux-aarch64.artifactbundle.zip",
+        checksum: "11180a8fe296e7b732a2915d54f0ca740b18d425a620a783fdf8703babc7434b"
     ),
     "skia-linux-x86_64.artifactbundle.zip": (
-        url: "https://github.com/NucleantUI/NucleantSkia/releases/download/0.0.2/skia-linux-x86_64.artifactbundle.zip",
-        checksum: "927b5bd564bc3c83edec350416e614cb82bbde2c01ccc5162a3c9c9264c2c44e"
+        url: "https://github.com/NucleantUI/NucleantSkia/releases/download/0.1.0/skia-linux-x86_64.artifactbundle.zip",
+        checksum: "c577b301984e67a45327ca78ed9399000d1518aea3361d2936aeb20549853daf"
     ),
     "skia-wasm32.artifactbundle.zip": (
-        url: "https://github.com/NucleantUI/NucleantSkia/releases/download/0.0.2/skia-wasm32.artifactbundle.zip",
-        checksum: "5584d3e80b0b7f49e4585f9015aeaa39bce26104932da526c915ff325baa543b"
+        url: "https://github.com/NucleantUI/NucleantSkia/releases/download/0.1.0/skia-wasm32.artifactbundle.zip",
+        checksum: "b2ec9eee363e8258ef13c22b0b12b363bfcf0ab1b1f6f03205d9bc7273c1b813"
     ),
     "skia-windows-x86_64.artifactbundle.zip": (
-        url: "https://github.com/NucleantUI/NucleantSkia/releases/download/0.0.2/skia-windows-x86_64.artifactbundle.zip",
-        checksum: "54d2de65db292053872fe72e9bd25303062d0efe1c4f661a6e4947db98c35215"
+        url: "https://github.com/NucleantUI/NucleantSkia/releases/download/0.1.0/skia-windows-x86_64.artifactbundle.zip",
+        checksum: "dc732bdf389d360405939ae15891c3c76ad7db60be003b3768e1007e68d097b9"
     ),
 ]
 
