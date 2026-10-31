@@ -1,9 +1,9 @@
 //
-//  VulkanRenderEngine+Skia.swift
+//  VulkanRenderDevice+Skia.swift
 //  PyNucleantUI
 //
-//  The Skia side of the engine: a Ganesh Vulkan context sharing the
-//  engine's device/queue, widget nodes whose VkImage Skia renders into
+//  The Skia side of the device: a Ganesh Vulkan context sharing the
+//  device's VkDevice/queue, widget nodes whose VkImage Skia renders into
 //  directly, and the per-frame update the node dispatch routes `.skia`
 //  slots to. Everything lives in this file so the engine core stays
 //  Skia-free.
@@ -17,9 +17,9 @@ import CSkia
 
 // MARK: - Node factory
 
-extension VulkanRenderEngine {
+extension VulkanRenderDevice {
 
-    /// Build a Ganesh Vulkan context over this engine's instance/device/
+    /// Build a Ganesh Vulkan context over this device's instance/device/
     /// queue. One context per canvas is fine for now — contexts don't
     /// share GPU caches, but ownership stays trivially scoped: the canvas
     /// drops surface + context before the engine (and its VkDevice) go.
@@ -91,7 +91,7 @@ extension VulkanRenderEngine {
         imageInfo.sharingMode   = VK_SHARING_MODE_EXCLUSIVE
         imageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED
         guard vkCreateImage(device, &imageInfo, nil, &image) == VK_SUCCESS, let image else {
-            print("VulkanRenderEngine: skia node image creation failed")
+            print("VulkanRenderDevice: skia node image creation failed")
             return nil
         }
 
@@ -107,7 +107,7 @@ extension VulkanRenderEngine {
         )
         guard vkAllocateMemory(device, &allocInfo, nil, &memory) == VK_SUCCESS else {
             vkDestroyImage(device, image, nil)
-            print("VulkanRenderEngine: skia node memory allocation failed")
+            print("VulkanRenderDevice: skia node memory allocation failed")
             return nil
         }
         vkBindImageMemory(device, image, memory, 0)
@@ -126,7 +126,7 @@ extension VulkanRenderEngine {
         guard vkCreateImageView(device, &viewInfo, nil, &view) == VK_SUCCESS, let view else {
             vkDestroyImage(device, image, nil)
             vkFreeMemory(device, memory, nil)
-            print("VulkanRenderEngine: skia node image view creation failed")
+            print("VulkanRenderDevice: skia node image view creation failed")
             return nil
         }
 
@@ -159,7 +159,7 @@ extension VulkanRenderEngine {
             vkDestroyImageView(device, view, nil)
             vkDestroyImage(device, image, nil)
             vkFreeMemory(device, memory, nil)
-            print("VulkanRenderEngine: skia surface wrap failed")
+            print("VulkanRenderDevice: skia surface wrap failed")
             return nil
         }
 
@@ -197,15 +197,14 @@ extension VulkanRenderEngine {
     /// z-order, Observation registration — is preserved and nothing above
     /// needs rebinding. A resize must not remake the node (that's for widget
     /// add/remove or a canvas swap). The old surface goes at once; the old
-    /// image/view/memory once the frames in flight are done with them
-    /// (`releaseAfterInFlightFrames`). Returns false — node untouched, still
+    /// image/view/memory once the work in flight is done with them
+    /// (`releaseAfterInFlightWork`). Returns false — node untouched, still
     /// at the old size — on any failure, so the widget stays visible instead
     /// of going dark.
     ///
-    /// `id` is the node's composite slot id: the engine caches a sampler
-    /// descriptor per slot on the assumption a node's imageView never changes,
-    /// so that cache is dropped here (`invalidateComposite`) to force a rebuild
-    /// from the new view.
+    /// `id` is the node's composite slot id: it is unpublished until the
+    /// next update leaves the new image readable, and every window's
+    /// composite set rebuilds from the new view on its own.
     @discardableResult
     public func resizeSkiaNode(
         _ node: SkiaShaderNode<RenderNode>,
@@ -228,7 +227,7 @@ extension VulkanRenderEngine {
             width:   width,
             height:  height
         ), let freshSurface = fresh.canvas.surface else {
-            print("VulkanRenderEngine: skia node resize backing creation failed")
+            print("VulkanRenderDevice: skia node resize backing creation failed")
             return false
         }
 
@@ -248,18 +247,17 @@ extension VulkanRenderEngine {
         node.canvas.replaceSurface(freshSurface)
         node.dirty         = true
 
-        // Old backing: freed once the frames that may still sample it are
-        // done — without stalling this one on the whole device going idle.
+        // Old backing: freed once the work that may still sample it, in any
+        // window, is done — without stalling on the whole device going idle.
         let device = device
-        releaseAfterInFlightFrames {
+        releaseAfterInFlightWork {
             vkDestroyImageView(device, oldView, nil)
             vkDestroyImage(device, oldImage, nil)
             if let oldMemory { vkFreeMemory(device, oldMemory, nil) }
         }
 
-        // Cached sampler descriptor still points at the freed view — drop it so
-        // the next frame rebuilds from the new one.
-        invalidateComposite(id: id)
+        // The new image isn't in SHADER_READ_ONLY until the next update.
+        readable.remove(id)
         return true
     }
 
@@ -272,7 +270,7 @@ extension VulkanRenderEngine {
 
 // MARK: - Per-frame update
 
-extension VulkanRenderEngine {
+extension VulkanRenderDevice {
 
     /// The Skia counterpart of the thor update, dispatched from the
     /// engine's per-slot switch. Skia flushes its recorded drawing on the
