@@ -46,12 +46,12 @@ final class SkiaSlot: RenderContainerNode, @unchecked Sendable {
         if case .skia(let node) = context { observe(node) }
     }
 
-    func update(engine: Engine, cmd: VkCommandBuffer) {
-        if case .skia(let node) = context { node.update(engine, slot: self, cmd: cmd) }
+    func update(device: Device, cmd: VkCommandBuffer) {
+        if case .skia(let node) = context { node.update(device, slot: self, cmd: cmd) }
     }
 
-    func destroyResources(engine: Engine) {
-        if case .skia(let node) = context { node.destroyResources(engine) }
+    func destroyResources(device: Device) {
+        if case .skia(let node) = context { node.destroyResources(device) }
     }
 
     func getImageView() -> VkImageView? {
