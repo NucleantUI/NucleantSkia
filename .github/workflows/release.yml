@@ -199,7 +199,7 @@ jobs:
         run: |
           mkdir -p consumer/Sources/Consumer && cd consumer
           cat > Package.swift <<EOF
-          // swift-tools-version: 6.2
+          // swift-tools-version: 6.3
           import PackageDescription
 
           let package = Package(
@@ -242,7 +242,7 @@ jobs:
         run: |
           mkdir -p consumer/Sources/Consumer && cd consumer
           cat > Package.swift <<EOF
-          // swift-tools-version: 6.2
+          // swift-tools-version: 6.3
           import PackageDescription
 
           let package = Package(
